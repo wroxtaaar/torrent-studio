@@ -1,0 +1,7 @@
+{
+  "name": "SeedFlow - Cloud Torrent & Media Streamer",
+  "description": "Seedr-style cloud downloader with qBittorrent API orchestration, unlimited server storage, direct download links, in-browser video & audio streaming, selective file downloads, multi-user folders, and push notifications.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
