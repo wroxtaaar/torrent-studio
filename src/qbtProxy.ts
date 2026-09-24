@@ -699,14 +699,16 @@ export function installQbtProxy(app: Express) {
 
         const category = String(body.category || 'Downloads');
         const sourceHash = extractInfoHash(urls);
+        const existingHash = String(body.existingHash || '').trim().toLowerCase();
         let hashes: string[] = [];
 
-        if (sourceHash && await torrentExists(sourceHash)) {
-          hashes = [sourceHash];
+        const reuseHash = existingHash || sourceHash;
+        if (reuseHash && await torrentExists(reuseHash)) {
+          hashes = [reuseHash];
           await qbtJson('/api/v2/torrents/stop', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ hashes: sourceHash }),
+            body: new URLSearchParams({ hashes: reuseHash }),
           });
         } else {
           hashes = await addTorrentForMetadata(urls, category);
