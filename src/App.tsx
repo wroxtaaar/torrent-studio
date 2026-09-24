@@ -240,12 +240,14 @@ export default function App() {
 
   const handlePauseTorrent = async (hash: string) => {
     await api.pauseTorrent(hash);
-    setTorrents(prev => prev.map(t => (t.hash === hash ? { ...t, state: 'pausedDL', dlspeed: 0 } : t)));
+    const updated = await api.getTorrents();
+    setTorrents(updated);
   };
 
   const handleResumeTorrent = async (hash: string) => {
     await api.resumeTorrent(hash);
-    setTorrents(prev => prev.map(t => (t.hash === hash ? { ...t, state: 'downloading', dlspeed: 21000000 } : t)));
+    const updated = await api.getTorrents();
+    setTorrents(updated);
   };
 
   const handleDeleteTorrent = (hash: string) => {
