@@ -48,9 +48,7 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
   const audioRef = useRef<HTMLAudioElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  if (!file) return null;
-
-  const isVideo = file.type === 'video';
+  const isVideo = file?.type === 'video';
   const mediaRef = isVideo ? videoRef : audioRef;
 
   useEffect(() => {
@@ -59,6 +57,8 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
     setIsPlaying(true);
     setMediaError('');
   }, [file?.id]);
+
+  if (!file) return null;
 
   const handleMediaError = () => {
     const media = mediaRef.current;
