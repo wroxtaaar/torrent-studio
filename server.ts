@@ -41,7 +41,15 @@ const qbtApiKey = process.env.QBT_API_KEY || process.env.QBITTORRENT_API_KEY || 
 
 const prowlarrBase = (process.env.PROWLARR_URL || 'http://prowlarr:9696').replace(/\/$/, '');
 const prowlarrApiKey = process.env.PROWLARR_API_KEY || '';
-const torrentSearchGrabs = new Map<string, { url: string; expiresAt: number }>();
+type TorrentSearchGrab = {
+  url: string;
+  expiresAt: number;
+  query?: string;
+  guid?: string;
+};
+
+const torrentSearchGrabs = new Map<string, TorrentSearchGrab>();
+const TORRENT_SEARCH_GRAB_TTL_MS = 60 * 60 * 1000;
 const torrentSearchCache = new Map<string, { createdAt: number; results: any[] }>();
 
 function fetchExternalBuffer(
@@ -401,7 +409,11 @@ async function searchTorrentIndexer(query: string, limit = 50, offset = 0) {
       .map((release: any) => {
         const magnetUrl = String(release.magnetUrl || release.magneturl || '').trim();
         const downloadUrl = String(release.downloadUrl || release.downloadurl || '').trim();
-        const sourceUrl = magnetUrl || (downloadUrl ? createTorrentSearchGrab(downloadUrl) : '');
+        const sourceUrl = magnetUrl || (
+          downloadUrl
+            ? createTorrentSearchGrab(downloadUrl, query, String(release.guid || ''))
+            : ''
+        );
         return {
           guid: release.guid,
           title: String(release.title || release.sortTitle || 'Untitled'),
@@ -424,9 +436,14 @@ async function searchTorrentIndexer(query: string, limit = 50, offset = 0) {
   }
 }
 
-function createTorrentSearchGrab(url: string): string {
+function createTorrentSearchGrab(url: string, query?: string, guid?: string): string {
   const token = crypto.randomBytes(24).toString('hex');
-  torrentSearchGrabs.set(token, { url, expiresAt: Date.now() + 10 * 60 * 1000 });
+  torrentSearchGrabs.set(token, {
+    url,
+    query: query?.trim(),
+    guid: guid?.trim(),
+    expiresAt: Date.now() + TORRENT_SEARCH_GRAB_TTL_MS,
+  });
   return '/api/search/torrents/grab/' + token;
 }
 
@@ -434,6 +451,53 @@ function purgeExpiredTorrentSearchGrabs() {
   const now = Date.now();
   for (const [token, value] of torrentSearchGrabs) {
     if (value.expiresAt <= now) torrentSearchGrabs.delete(token);
+  }
+}
+
+async function refreshTorrentSearchGrab(grab: TorrentSearchGrab): Promise<boolean> {
+  if (!grab.query) return false;
+
+  const url = new URL('/api/v1/search', prowlarrBase);
+  url.searchParams.set('query', grab.query);
+  url.searchParams.set('type', 'search');
+  url.searchParams.set('limit', '100');
+  url.searchParams.set('offset', '0');
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'Accept': 'application/json',
+        'X-Api-Key': prowlarrApiKey,
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) return false;
+
+    const releases = await response.json();
+    const list = Array.isArray(releases)
+      ? releases
+      : Array.isArray(releases?.results) ? releases.results : [];
+
+    const match = list.find((release: any) =>
+      grab.guid && String(release.guid || '') === grab.guid
+    );
+
+    if (!match) return false;
+
+    const magnetUrl = String(match.magnetUrl || match.magneturl || '').trim();
+    const downloadUrl = String(match.downloadUrl || match.downloadurl || '').trim();
+    const freshUrl = magnetUrl || downloadUrl;
+    if (!freshUrl) return false;
+
+    grab.url = freshUrl;
+    grab.expiresAt = Date.now() + TORRENT_SEARCH_GRAB_TTL_MS;
+    console.log('[SEARCH-GRAB] refreshed expired Prowlarr release:', grab.guid || grab.query);
+    return true;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -829,6 +893,31 @@ async function main() {
       }
 
       if (upstream.status < 200 || upstream.status >= 300) {
+        // Prowlarr release download URLs can expire independently of our local
+        // grab token. Refresh the release from Prowlarr once, then retry.
+        if ([401, 403, 404, 410].includes(upstream.status) && await refreshTorrentSearchGrab(grab)) {
+          const retry = await fetchExternalBuffer(grab.url, {
+            'Accept': 'application/x-bittorrent, application/octet-stream, text/plain, */*',
+            'X-Api-Key': prowlarrApiKey,
+            'User-Agent': 'Torrent-Studio/1.0',
+          });
+
+          if (retry.status >= 200 && retry.status < 300) {
+            if (!retry.data.length) return res.status(502).send('Prowlarr returned an empty torrent response after refresh');
+            const contentTypeRetry = Array.isArray(retry.headers['content-type'])
+              ? String(retry.headers['content-type'][0] || '')
+              : String(retry.headers['content-type'] || '');
+            res.setHeader(
+              'Content-Type',
+              /^text\/plain/i.test(contentTypeRetry)
+                ? 'text/plain; charset=utf-8'
+                : (contentTypeRetry || 'application/x-bittorrent')
+            );
+            res.setHeader('Content-Length', String(retry.data.length));
+            return res.send(retry.data);
+          }
+        }
+
         const body = upstream.data.toString('utf8').slice(0, 2000);
         return res.status(upstream.status).send(body || 'Unable to retrieve torrent from Prowlarr');
       }
@@ -873,8 +962,24 @@ async function main() {
         return res.status(400).json({ error: 'Search query must be at least 2 characters.' });
       }
 
+      purgeExpiredTorrentSearchGrabs();
+
+      const cacheKey = query.toLowerCase() + '|' + Math.min(Math.max(limit, 1), 100) + '|' + Math.max(offset, 0);
+      const cached = torrentSearchCache.get(cacheKey);
+      if (cached && Date.now() - cached.createdAt < 2 * 60 * 1000) {
+        return res.json({ results: cached.results, cached: true });
+      }
+
       const results = await searchTorrentIndexer(query, limit, offset);
-      return res.json({ results });
+      torrentSearchCache.set(cacheKey, { createdAt: Date.now(), results });
+
+      if (torrentSearchCache.size > 50) {
+        const oldest = [...torrentSearchCache.entries()]
+          .sort((a, b) => a[1].createdAt - b[1].createdAt)[0];
+        if (oldest) torrentSearchCache.delete(oldest[0]);
+      }
+
+      return res.json({ results, cached: false });
     } catch (error: any) {
       console.error('[SEARCH]', error?.message || error);
       const status = Number(error?.status) || 502;
