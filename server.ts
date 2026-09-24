@@ -5,6 +5,8 @@ import path from 'path';
 import crypto from 'crypto';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
+import http from 'http';
+import https from 'https';
 import * as archiver from 'archiver';
 import { installQbtProxy } from './src/qbtProxy.ts';
 import type {
@@ -41,6 +43,61 @@ const prowlarrBase = (process.env.PROWLARR_URL || 'http://prowlarr:9696').replac
 const prowlarrApiKey = process.env.PROWLARR_API_KEY || '';
 const torrentSearchGrabs = new Map<string, { url: string; expiresAt: number }>();
 const torrentSearchCache = new Map<string, { createdAt: number; results: any[] }>();
+
+function fetchExternalBuffer(
+  targetUrl: string,
+  headers: Record<string, string>,
+  maxRedirects = 5,
+): Promise<{ status: number; headers: http.IncomingHttpHeaders; data: Buffer }> {
+  return new Promise((resolve, reject) => {
+    const visit = (urlValue: string, redirectsLeft: number) => {
+      let parsed: URL;
+      try {
+        parsed = new URL(urlValue);
+      } catch {
+        reject(new Error('Invalid upstream download URL'));
+        return;
+      }
+
+      const transport = parsed.protocol === 'https:' ? https : http;
+      const request = transport.get(parsed, {
+        headers,
+        timeout: 120000,
+      }, response => {
+        const status = response.statusCode || 502;
+
+        if (status >= 300 && status < 400 && response.headers.location) {
+          response.resume();
+
+          if (redirectsLeft <= 0) {
+            reject(new Error('Too many redirects while retrieving torrent'));
+            return;
+          }
+
+          const next = new URL(response.headers.location, parsed).toString();
+          visit(next, redirectsLeft - 1);
+          return;
+        }
+
+        const chunks: Buffer[] = [];
+        response.on('data', chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+        response.on('end', () => resolve({
+          status,
+          headers: response.headers,
+          data: Buffer.concat(chunks),
+        }));
+        response.on('error', reject);
+      });
+
+      request.on('timeout', () => {
+        request.destroy(new Error('Upstream torrent download timed out'));
+      });
+      request.on('error', reject);
+    };
+
+    visit(targetUrl, maxRedirects);
+  });
+}
 
 function readJson<T>(file: string, fallback: T): T {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')) as T; } catch { return fallback; }
@@ -733,59 +790,37 @@ async function main() {
     }
 
     try {
-      // Prowlarr download endpoints can either return a .torrent file or
-      // redirect to a magnet URI. Do not let Node's fetch follow a magnet
-      // redirect because WHATWG fetch cannot fetch the magnet scheme.
-      const upstream = await fetch(grab.url, {
-        redirect: 'manual',
-        headers: {
-          'Accept': 'application/x-bittorrent, application/octet-stream, text/plain, */*',
-          'X-Api-Key': prowlarrApiKey,
-        },
+      // Prowlarr download endpoints may take the indexer's Cloudflare
+      // challenge path and can redirect to either a .torrent file or magnet.
+      // Use the Node HTTP client here so redirects are explicit and failures
+      // expose the actual upstream URL/error instead of a generic fetch error.
+      const upstream = await fetchExternalBuffer(grab.url, {
+        'Accept': 'application/x-bittorrent, application/octet-stream, text/plain, */*',
+        'X-Api-Key': prowlarrApiKey,
+        'User-Agent': 'Torrent-Studio/1.0',
       });
 
       if (upstream.status >= 300 && upstream.status < 400) {
-        const location = upstream.headers.get('location') || '';
+        // fetchExternalBuffer follows HTTP redirects itself, so this branch is
+        // only here defensively for unusual upstream responses.
+        const location = String(upstream.headers.location?.[0] || '');
         if (/^magnet:\?/i.test(location)) {
           res.setHeader('Content-Type', 'text/plain; charset=utf-8');
           res.setHeader('Cache-Control', 'no-store');
           return res.status(200).send(location);
         }
-
-        if (location) {
-          const redirected = await fetch(new URL(location, grab.url), {
-            headers: {
-              'Accept': 'application/x-bittorrent, application/octet-stream, text/plain, */*',
-              'X-Api-Key': prowlarrApiKey,
-            },
-          });
-
-          if (!redirected.ok) {
-            const body = await redirected.text();
-            return res.status(redirected.status).send(body || 'Unable to retrieve torrent from Prowlarr');
-          }
-
-          const data = Buffer.from(await redirected.arrayBuffer());
-          if (!data.length) return res.status(502).send('Prowlarr returned an empty torrent response');
-
-          res.setHeader('Content-Type', redirected.headers.get('content-type') || 'application/x-bittorrent');
-          const disposition = redirected.headers.get('content-disposition');
-          if (disposition) res.setHeader('Content-Disposition', disposition);
-          res.setHeader('Content-Length', String(data.length));
-          return res.send(data);
-        }
       }
 
-      if (!upstream.ok) {
-        const body = await upstream.text();
+      if (upstream.status < 200 || upstream.status >= 300) {
+        const body = upstream.data.toString('utf8').slice(0, 2000);
         return res.status(upstream.status).send(body || 'Unable to retrieve torrent from Prowlarr');
       }
 
-      const data = Buffer.from(await upstream.arrayBuffer());
+      const data = upstream.data;
       if (!data.length) return res.status(502).send('Prowlarr returned an empty torrent file');
 
-      const contentType = upstream.headers.get('content-type') || '';
-      const disposition = upstream.headers.get('content-disposition');
+      const contentType = String(upstream.headers['content-type']?.[0] || '');
+      const disposition = String(upstream.headers['content-disposition']?.[0] || '');
       res.setHeader(
         'Content-Type',
         /^text\/plain/i.test(contentType) ? 'text/plain; charset=utf-8' : (contentType || 'application/x-bittorrent')
@@ -794,7 +829,13 @@ async function main() {
       res.setHeader('Content-Length', String(data.length));
       return res.send(data);
     } catch (error: any) {
-      console.error('[SEARCH-GRAB]', error?.message || error);
+      console.error(
+        '[SEARCH-GRAB]',
+        error?.code || '',
+        error?.cause?.code || '',
+        grab.url,
+        error?.message || error
+      );
       return res.status(502).send(error?.message || 'Unable to retrieve torrent');
     }
   });
