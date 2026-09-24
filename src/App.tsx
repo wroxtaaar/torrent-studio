@@ -111,6 +111,7 @@ export default function App() {
   const [isCleanupOpen, setIsCleanupOpen] = useState(false);
   const [isQbtSettingsOpen, setIsQbtSettingsOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
   const [shareFolder, setShareFolder] = useState<StorageFolder | null>(null);
   const [isCreateFolderOpen, setIsCreateFolderOpen] = useState(false);
   const [moveFile, setMoveFile] = useState<StorageFile | null>(null);
@@ -597,7 +598,7 @@ export default function App() {
 
             {/* Active User Switcher dropdown */}
             {activeUser && (
-              <div className="flex items-center pl-1 border-l border-slate-800">
+              <div className="hidden sm:flex items-center pl-1 border-l border-slate-800">
                 <select
                   value={activeUser.id}
                   onChange={(e) => handleSwitchUser(e.target.value)}
@@ -1100,67 +1101,127 @@ export default function App() {
         <Plus className="w-6 h-6 stroke-[2.5]" />
       </button>
 
-      {/* Mobile Bottom Navigation Bar (Requirement 10: mobile friendly) */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-lg border-t border-slate-800 px-2 py-2 flex items-center justify-around">
-        <button
-          onClick={() => setActiveTab('search')}
-          className={activeTab === 'search'
-            ? 'flex flex-col items-center gap-1 p-2 rounded-xl transition text-cyan-400'
-            : 'flex flex-col items-center gap-1 p-2 rounded-xl transition text-slate-400'}
-        >
-          <Search className="w-5 h-5" />
-          <span className="text-[10px] font-semibold">Search</span>
-        </button>
+      {/* Mobile More actions sheet */}
+      {isMobileMoreOpen && (
+        <>
+          <button
+            type="button"
+            aria-label="Close more menu"
+            onClick={() => setIsMobileMoreOpen(false)}
+            className="md:hidden fixed inset-0 z-40 bg-black/50 backdrop-blur-[1px]"
+          />
+          <div className="md:hidden fixed left-3 right-3 bottom-20 z-50 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl p-3">
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => { setActiveTab('activity'); setIsMobileMoreOpen(false); }}
+                className="p-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-2"
+              >
+                <History className="w-4 h-4 text-cyan-400" />
+                Activity Log
+              </button>
 
-        <button
-          onClick={() => setActiveTab('transfers')}
-          className={`flex flex-col items-center gap-1 p-2 rounded-xl transition ${
-            activeTab === 'transfers' ? 'text-cyan-400' : 'text-slate-400'
-          }`}
-        >
-          <Download className="w-5 h-5" />
-          <span className="text-[10px] font-semibold">Transfers</span>
-        </button>
+              <button
+                type="button"
+                onClick={() => { setActiveTab('storage'); setIsMobileMoreOpen(false); }}
+                className="p-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-2"
+              >
+                <Sparkles className="w-4 h-4 text-cyan-400" />
+                Storage
+              </button>
 
-        <button
-          onClick={() => setActiveTab('files')}
-          className={`flex flex-col items-center gap-1 p-2 rounded-xl transition ${
-            activeTab === 'files' ? 'text-cyan-400' : 'text-slate-400'
-          }`}
-        >
-          <Folder className="w-5 h-5" />
-          <span className="text-[10px] font-semibold">Files</span>
-        </button>
+              <button
+                type="button"
+                onClick={() => { setIsQbtSettingsOpen(true); setIsMobileMoreOpen(false); }}
+                className="p-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-2"
+              >
+                <Cpu className="w-4 h-4 text-cyan-400" />
+                qBittorrent
+              </button>
 
-        <button
-          onClick={() => setActiveTab('shared')}
-          className={`flex flex-col items-center gap-1 p-2 rounded-xl transition ${
-            activeTab === 'shared' ? 'text-cyan-400' : 'text-slate-400'
-          }`}
-        >
-          <Share2 className="w-5 h-5" />
-          <span className="text-[10px] font-semibold">Shared</span>
-        </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTheme(theme === 'dark' ? 'dim' : theme === 'dim' ? 'light' : 'dark');
+                }}
+                className="p-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-2"
+              >
+                {theme === 'light'
+                  ? <Sun className="w-4 h-4 text-amber-400" />
+                  : <Moon className="w-4 h-4 text-cyan-400" />}
+                Theme: {theme}
+              </button>
 
-        <button
-          onClick={() => setActiveTab('activity')}
-          className={`flex flex-col items-center gap-1 p-2 rounded-xl transition ${
-            activeTab === 'activity' ? 'text-cyan-400' : 'text-slate-400'
-          }`}
-        >
-          <History className="w-5 h-5" />
-          <span className="text-[10px] font-semibold">Logs</span>
-        </button>
+              {activeUser && (
+                <label className="col-span-2 p-3 rounded-xl bg-slate-800 text-slate-200 text-xs font-semibold flex items-center gap-2">
+                  <Users className="w-4 h-4 text-cyan-400" />
+                  <span className="flex-1">Profile</span>
+                  <select
+                    value={activeUser.id}
+                    onChange={(e) => handleSwitchUser(e.target.value)}
+                    className="max-w-[55%] bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-cyan-500"
+                  >
+                    {users.map(u => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
-        <button
-          onClick={() => setActiveTab('storage')}
-          className={`flex flex-col items-center gap-1 p-2 rounded-xl transition ${
-            activeTab === 'storage' ? 'text-cyan-400' : 'text-slate-400'
-          }`}
-        >
-          <Sparkles className="w-5 h-5" />
-          <span className="text-[10px] font-semibold">Storage</span>
-        </button>
+      {/* Mobile Bottom Navigation */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-slate-950/95 backdrop-blur-xl border-t border-slate-800 px-1 pb-[calc(env(safe-area-inset-bottom)+4px)] pt-1.5">
+        <div className="grid grid-cols-5 items-center">
+          <button
+            onClick={() => { setActiveTab('search'); setIsMobileMoreOpen(false); }}
+            className={`flex flex-col items-center justify-center gap-0.5 min-h-12 px-1 rounded-xl transition ${activeTab === 'search' ? 'text-cyan-400' : 'text-slate-400'}`}
+          >
+            <Search className="w-5 h-5" />
+            <span className="text-[9px] font-semibold">Search</span>
+          </button>
+
+          <button
+            onClick={() => { setActiveTab('transfers'); setIsMobileMoreOpen(false); }}
+            className={`relative flex flex-col items-center justify-center gap-0.5 min-h-12 px-1 rounded-xl transition ${activeTab === 'transfers' ? 'text-cyan-400' : 'text-slate-400'}`}
+          >
+            <Download className="w-5 h-5" />
+            <span className="text-[9px] font-semibold">Transfers</span>
+            {activeDownloadsCount > 0 && (
+              <span className="absolute top-0.5 right-[23%] min-w-4 h-4 px-1 rounded-full bg-cyan-500 text-slate-950 text-[8px] font-black flex items-center justify-center">
+                {activeDownloadsCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => { setActiveTab('files'); setIsMobileMoreOpen(false); }}
+            className={`flex flex-col items-center justify-center gap-0.5 min-h-12 px-1 rounded-xl transition ${activeTab === 'files' ? 'text-cyan-400' : 'text-slate-400'}`}
+          >
+            <Folder className="w-5 h-5" />
+            <span className="text-[9px] font-semibold">Files</span>
+          </button>
+
+          <button
+            onClick={() => { setActiveTab('shared'); setIsMobileMoreOpen(false); }}
+            className={`flex flex-col items-center justify-center gap-0.5 min-h-12 px-1 rounded-xl transition ${activeTab === 'shared' ? 'text-cyan-400' : 'text-slate-400'}`}
+          >
+            <Share2 className="w-5 h-5" />
+            <span className="text-[9px] font-semibold">Shared</span>
+          </button>
+
+          <button
+            onClick={() => setIsMobileMoreOpen(prev => !prev)}
+            className={`flex flex-col items-center justify-center gap-0.5 min-h-12 px-1 rounded-xl transition ${isMobileMoreOpen || activeTab === 'activity' || activeTab === 'storage' ? 'text-cyan-400' : 'text-slate-400'}`}
+          >
+            <Layers className="w-5 h-5" />
+            <span className="text-[9px] font-semibold">More</span>
+          </button>
+        </div>
       </nav>
 
       {/* Modals */}
