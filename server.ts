@@ -15,7 +15,10 @@ const __dirname = path.dirname(__filename);
 const PORT = Number(process.env.PORT) || 3000;
 
 const STORAGE_DIR = path.resolve(process.env.STORAGE_DIR || path.join(__dirname, 'storage'));
-const DOWNLOADS_DIR = path.resolve(process.env.DOWNLOADS_DIR || path.join(STORAGE_DIR, 'downloads'));
+const defaultDownloadsDir = fs.existsSync(path.resolve(process.cwd(), 'downloads'))
+  ? path.resolve(process.cwd(), 'downloads')
+  : path.join(STORAGE_DIR, 'downloads');
+const DOWNLOADS_DIR = path.resolve(process.env.DOWNLOADS_DIR || defaultDownloadsDir);
 const META_DIR = path.join(STORAGE_DIR, 'meta');
 const USERS_FILE = path.join(META_DIR, 'users.json');
 const FOLDERS_FILE = path.join(META_DIR, 'folders.json');
@@ -232,6 +235,52 @@ function cleanup(dryRun = false) {
   return { bytesFreed, filesRemoved: 0, tempRemoved, orphansRemoved: 0 };
 }
 
+function resolveQbtDownloadPath(torrent: any, qbtFile: any): string | null {
+  const qbtName = String(qbtFile?.name || '').replace(/^[/\\]+/, '');
+  const qbtSavePath = String(torrent?.save_path || '/downloads');
+  const qbtContentPath = String(torrent?.content_path || '');
+  const downloadsRoot = path.resolve(DOWNLOADS_DIR);
+
+  const mapQbtPath = (qbtPath: string): string => {
+    if (qbtPath === '/downloads' || qbtPath.startsWith('/downloads/')) {
+      const suffix = qbtPath.slice('/downloads'.length).replace(/^[/\\]+/, '');
+      return path.resolve(DOWNLOADS_DIR, suffix);
+    }
+    return path.resolve(qbtPath);
+  };
+
+  const candidates: string[] = [];
+
+  if (qbtContentPath && qbtContentPath.startsWith('/downloads')) {
+    const mappedContent = mapQbtPath(qbtContentPath);
+    try {
+      if (fs.existsSync(mappedContent) && fs.statSync(mappedContent).isFile()) {
+        candidates.push(mappedContent);
+      }
+    } catch {}
+  }
+
+  if (qbtName) {
+    candidates.push(mapQbtPath(qbtSavePath + '/' + qbtName));
+  }
+
+  if (qbtContentPath && qbtContentPath.startsWith('/downloads')) {
+    const mappedContent = mapQbtPath(qbtContentPath);
+    candidates.push(path.join(mappedContent, path.basename(qbtName)));
+    candidates.push(path.join(mappedContent, qbtName));
+  }
+
+  for (const candidate of candidates) {
+    const full = path.resolve(candidate);
+    if (full !== downloadsRoot && !full.startsWith(downloadsRoot + path.sep)) continue;
+    try {
+      if (fs.existsSync(full) && fs.statSync(full).isFile()) return full;
+    } catch {}
+  }
+
+  return null;
+}
+
 function sendFile(req: Request, res: Response, fullPath: string, download: boolean) {
   if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) return res.status(404).send('File not found');
   const st = fs.statSync(fullPath); const size = st.size;
@@ -414,17 +463,8 @@ async function main() {
       if(Number(file.priority)<=0) return res.status(409).send('File is not selected for download');
       if(Number(file.progress)<0.999) return res.status(409).send('File is not complete');
 
-      const qbtRoot=String(t.content_path || t.save_path || '/downloads');
-      const root=qbtRoot.startsWith('/downloads')
-        ? path.join(DOWNLOADS_DIR,qbtRoot.slice('/downloads'.length).replace(/^[/\\]+/,''))
-        : qbtRoot;
-      const rel=String(file.name||'').replace(/^[/\\]+/,'');
-      const candidate=path.resolve(root,rel);
-      const rootResolved=path.resolve(root);
-      if(candidate!==rootResolved && !candidate.startsWith(rootResolved+path.sep)) {
-        return res.status(400).send('Invalid file path');
-      }
-      if(!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) return res.status(404).send('File not found');
+      const candidate = resolveQbtDownloadPath(t, file);
+      if (!candidate) return res.status(404).send('Downloaded file is not present on the server storage');
 
       log('download','Torrent File Downloaded',String(file.name||''),'info');
       return sendFile(req,res,candidate,true);
@@ -441,22 +481,23 @@ async function main() {
       const files:any[]=await qbtJson('/api/v2/torrents/files?hash='+encodeURIComponent(hash));
       const selected=files.filter(f=>Number(f.priority)>0 && Number(f.progress)>=0.999);
       if(!selected.length) return res.status(409).send('Torrent files are not complete');
-      const qbtRoot=String(t.content_path || t.save_path || '/downloads');
-      const root = qbtRoot.startsWith('/downloads')
-        ? path.join(DOWNLOADS_DIR, qbtRoot.slice('/downloads'.length).replace(/^[/\\\\]+/,''))
-        : qbtRoot;
       if(selected.length===1){
-        const rel=String(selected[0].name||'').replace(/^[/\\\\]+/,'');
-        const candidate=path.join(root,rel);
-        const full=fs.existsSync(candidate) ? candidate : (fs.existsSync(root) && fs.statSync(root).isFile() ? root : candidate);
-        return sendFile(req,res,full,true);
+        const candidate = resolveQbtDownloadPath(t, selected[0]);
+        if (!candidate) return res.status(404).send('Downloaded file is not present on the server storage');
+        return sendFile(req,res,candidate,true);
       }
+
+      const resolvedFiles = selected
+        .map((f:any) => ({ file: f, path: resolveQbtDownloadPath(t, f) }))
+        .filter((entry:any) => entry.path);
+
+      if(!resolvedFiles.length) return res.status(404).send('Downloaded files are not present on the server storage');
+
       res.setHeader('Content-Type','application/zip'); res.setHeader('Content-Disposition',`attachment; filename="${encodeURIComponent(t.name)}.zip"`);
       const archive=archiver('zip',{zlib:{level:1}}); archive.pipe(res);
-      for(const f of selected){
-        const rel=String(f.name||'').replace(/^[/\\]+/,'');
-        const full=path.join(root,rel);
-        if(fs.existsSync(full)&&fs.statSync(full).isFile()) archive.file(full,{name:rel});
+      for(const entry of resolvedFiles){
+        const rel = String(entry.file.name || path.basename(entry.path));
+        archive.file(entry.path,{name:rel});
       }
       archive.finalize();
     } catch(e:any) { res.status(502).send(e.message||'Download failed'); }
