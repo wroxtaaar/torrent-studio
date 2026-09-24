@@ -65,6 +65,15 @@ export const api = {
     return res.json();
   },
 
+  async exportTorrent(hash: string): Promise<Blob> {
+    const res = await fetch(`/api/v2/torrents/export?hash=${encodeURIComponent(hash)}`);
+    if (!res.ok) {
+      const message = await res.text().catch(() => '');
+      throw new Error(message || 'Failed to export torrent file');
+    }
+    return res.blob();
+  },
+
   async setFilePriority(hash: string, fileIds: string, priority: number): Promise<void> {
     const res = await fetch('/api/v2/torrents/filePrio', {
       method: 'POST',
