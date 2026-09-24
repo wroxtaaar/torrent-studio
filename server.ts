@@ -143,6 +143,9 @@ function scanFiles(): StorageFile[] {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) { walk(full); continue; }
       if (!entry.isFile()) continue;
+      // qBittorrent's .parts files are internal temporary storage artifacts,
+      // not user-facing media/files. Keep them out of the Cloud Files view.
+      if (entry.name.toLowerCase().endsWith('.parts')) continue;
       const rel = relativeFromPhysical(full);
       const stat = fs.statSync(full);
       const folder = path.posix.dirname('/' + rel);
