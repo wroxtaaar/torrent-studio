@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Search,
   Loader2,
@@ -109,13 +109,10 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
         </div>
 
         <form onSubmit={runSearch} className="mt-4 flex flex-col sm:flex-row gap-2">
-          <div
-            className="relative flex-1"
-          >
+          <div className="relative flex-1">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
             <input
               value={query}
-
               onChange={(e) => {
                 setQuery(e.target.value);
                 if (error) setError('');
@@ -146,46 +143,7 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
           </button>
         </form>
 
-        {recentSearches.length > 0 && (
-          <div className="mt-3 rounded-xl bg-slate-950/70 border border-slate-800 overflow-hidden">
-            <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800">
-              <span className="text-[11px] font-semibold text-slate-400">Recent Searches</span>
-              <button
-                type="button"
-                onClick={clearRecentSearches}
-                className="text-[10px] text-slate-500 hover:text-rose-400 transition"
-              >
-                Clear all
-              </button>
-            </div>
-            <div className="p-2 flex flex-wrap gap-1.5">
-              {recentSearches.map(search => (
-                <div
-                  key={search}
-                  className="flex items-center rounded-lg bg-slate-900 border border-slate-800 overflow-hidden"
-                >
-                  <button
-                    type="button"
-                    onClick={() => setQuery(search)}
-                    className="px-2.5 py-2 text-[11px] text-slate-300 hover:text-cyan-300 hover:bg-slate-800 transition max-w-[180px] truncate"
-                    title={`Use recent search: ${search}`}
-                  >
-                    {search}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => removeRecentSearch(search)}
-                    className="px-2 py-2 text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition"
-                    aria-label={`Remove ${search} from recent searches`}
-                    title="Remove"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+
       </div>
 
       {error && (
