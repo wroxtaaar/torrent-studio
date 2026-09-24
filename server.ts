@@ -32,6 +32,7 @@ const LOGS_FILE = path.join(META_DIR, 'logs.json');
 const NOTIFICATIONS_FILE = path.join(META_DIR, 'notifications.json');
 const CLEANUP_FILE = path.join(META_DIR, 'cleanup.json');
 const TORRENT_SEARCH_GRABS_FILE = path.join(META_DIR, 'torrent-search-grabs.json');
+const RECENT_SEARCHES_FILE = path.join(META_DIR, 'recent-searches.json');
 
 for (const dir of [STORAGE_DIR, DOWNLOADS_DIR, META_DIR, STREAM_CACHE_DIR, HLS_CACHE_DIR]) fs.mkdirSync(dir, { recursive: true });
 
@@ -60,6 +61,9 @@ function persistTorrentSearchGrabs() {
   writeJson(TORRENT_SEARCH_GRABS_FILE, values);
 }
 const torrentSearchCache = new Map<string, { createdAt: number; results: any[] }>();
+let recentSearches: string[] = readJson<string[]>(RECENT_SEARCHES_FILE, [])
+  .filter(value => typeof value === 'string')
+  .slice(0, 10);
 
 function fetchExternalBuffer(
   targetUrl: string,
@@ -981,6 +985,33 @@ async function main() {
       );
       return res.status(502).send(error?.message || 'Unable to retrieve torrent');
     }
+  });
+
+  const persistRecentSearches = () => {
+    writeJson(RECENT_SEARCHES_FILE, recentSearches);
+  };
+
+  app.get('/api/search/recent', (_req, res) => {
+    res.json({ searches: recentSearches });
+  });
+
+  app.post('/api/search/recent', express.json(), (req, res) => {
+    const search = String(req.body?.search || '').trim();
+    if (search.length < 2) return res.status(400).json({ error: 'Search must be at least 2 characters.' });
+
+    recentSearches = [
+      search,
+      ...recentSearches.filter(item => item.toLowerCase() !== search.toLowerCase())
+    ].slice(0, 10);
+
+    persistRecentSearches();
+    res.json({ searches: recentSearches });
+  });
+
+  app.delete('/api/search/recent', (_req, res) => {
+    recentSearches = [];
+    persistRecentSearches();
+    res.json({ ok: true });
   });
 
   app.get('/api/search/torrents', async (req,res)=>{
