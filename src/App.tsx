@@ -718,10 +718,13 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 0: TORRENT SEARCH */}
-        {activeTab === 'search' && (
+        {/* TAB 0: TORRENT SEARCH
+            Keep this component mounted when switching tabs so an in-flight
+            search continues in the background and its results remain available
+            when the user returns to Search. */}
+        <div className={activeTab === 'search' ? 'block' : 'hidden'}>
           <TorrentSearchPanel onAdd={handleSearchAdd} />
-        )}
+        </div>
 
         {/* TAB 1: TRANSFERS & SEEDBOX */}
         {activeTab === 'transfers' && (
