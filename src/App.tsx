@@ -261,9 +261,10 @@ export default function App() {
     magnet: string,
     category: string,
     selectedFiles?: number[],
-    manifest?: { name: string; size: number; priority: number }[]
+    manifest?: { name: string; size: number; priority: number }[],
+    existingHash?: string
   ) => {
-    await api.addMagnet(magnet, category, selectedFiles, manifest);
+    await api.addMagnet(magnet, category, selectedFiles, manifest, existingHash);
     const updated = await api.getTorrents();
     setTorrents(updated);
     const stats = await api.getStorageStats();
