@@ -16,15 +16,8 @@ const config: QbtConfig = {
   apiKey: process.env.QBT_API_KEY || process.env.QBITTORRENT_API_KEY,
 };
 
-function authHeaders(): Record<string, string> {
-  if (config.apiKey) return { Authorization: `Bearer ${config.apiKey}` };
-  if (config.username && config.password) {
-    return {
-      Authorization: 'Basic ' + Buffer.from(`${config.username}:${config.password}`).toString('base64'),
-    };
-  }
-  return {};
-}
+let qbtSessionCookie = '';
+let qbtLoginPromise: Promise<void> | null = null;
 
 function requireConfig() {
   if (!config.baseUrl) throw new Error('QBT_URL is not configured');
@@ -33,13 +26,61 @@ function requireConfig() {
   }
 }
 
-async function qbtFetch(pathname: string, init: RequestInit = {}): Promise<Response> {
-  requireConfig();
+async function qbtLogin(): Promise<void> {
+  if (config.apiKey) return;
+  if (qbtSessionCookie) return;
+  if (qbtLoginPromise) return qbtLoginPromise;
 
+  qbtLoginPromise = (async () => {
+    const form = new URLSearchParams();
+    form.set('username', config.username || '');
+    form.set('password', config.password || '');
+
+    const response = await fetch(config.baseUrl + '/api/v2/auth/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Referer': config.baseUrl + '/',
+        'Origin': config.baseUrl,
+      },
+      body: form,
+    });
+
+    const text = await response.text();
+    if (!response.ok || !/^Ok\.?$/i.test(text.trim())) {
+      throw Object.assign(
+        new Error(text || response.statusText || 'qBittorrent login failed'),
+        { status: response.status }
+      );
+    }
+
+    const setCookie = response.headers.get('set-cookie') || '';
+    const match = setCookie.match(/(QBT_SID_[^=]+=[^;]+)/);
+    if (!match) {
+      throw new Error('qBittorrent login succeeded but no session cookie was returned');
+    }
+
+    qbtSessionCookie = match[1];
+    console.log('[QBT] WebAPI session login successful');
+  })();
+
+  try {
+    await qbtLoginPromise;
+  } finally {
+    qbtLoginPromise = null;
+  }
+}
+
+async function qbtFetchOnce(pathname: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
-  for (const [key, value] of Object.entries(authHeaders())) headers.set(key, value);
+  if (config.apiKey) {
+    headers.set('Authorization', `Bearer ${config.apiKey}`);
+  } else {
+    headers.set('Cookie', qbtSessionCookie);
+  }
   headers.set('Accept', headers.get('Accept') || 'application/json');
   headers.set('Referer', config.baseUrl + '/');
+  headers.set('Origin', config.baseUrl);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20000);
@@ -53,6 +94,24 @@ async function qbtFetch(pathname: string, init: RequestInit = {}): Promise<Respo
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function qbtFetch(pathname: string, init: RequestInit = {}): Promise<Response> {
+  requireConfig();
+
+  if (!config.apiKey) await qbtLogin();
+
+  let response = await qbtFetchOnce(pathname, init);
+
+  // qBittorrent sessions can expire. Refresh exactly once rather than
+  // repeatedly retrying a bad credential and triggering an IP ban.
+  if (response.status === 403 && !config.apiKey) {
+    qbtSessionCookie = '';
+    await qbtLogin();
+    response = await qbtFetchOnce(pathname, init);
+  }
+
+  return response;
 }
 
 async function qbtJson(pathname: string, init: RequestInit = {}) {
