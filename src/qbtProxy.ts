@@ -8,7 +8,7 @@ type QbtConfig = {
 };
 
 const config: QbtConfig = {
-  baseUrl: (process.env.QBT_URL || process.env.QBITTORRENT_URL || 'http://localhost:8080').replace(/\/$/, ''),
+  baseUrl: (process.env.QBT_URL || process.env.QBITTORRENT_URL || 'http://qbittorrent:8080').replace(/\/$/, ''),
   username: process.env.QBT_USERNAME || process.env.QBITTORRENT_USERNAME,
   password: process.env.QBT_PASSWORD || process.env.QBITTORRENT_PASSWORD,
   apiKey: process.env.QBT_API_KEY || process.env.QBITTORRENT_API_KEY,
