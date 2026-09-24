@@ -421,7 +421,9 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
 
               {/* File item list */}
               <div className="max-h-60 overflow-y-auto divide-y divide-slate-800/60 p-1">
-                {inspectedFiles.map((file) => (
+                {[...inspectedFiles]
+                  .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
+                  .map((file) => (
                   <div
                     key={file.index}
                     onClick={() => toggleFile(file.index)}
