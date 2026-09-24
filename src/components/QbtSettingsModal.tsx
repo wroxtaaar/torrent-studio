@@ -3,12 +3,7 @@ import {
   X,
   Cpu,
   CheckCircle2,
-  Server,
-  Key,
-  Globe,
   RefreshCw,
-  ExternalLink,
-  ShieldCheck,
   Zap
 } from 'lucide-react';
 import { QbtSettings } from '../types/index.ts';
@@ -29,10 +24,6 @@ export const QbtSettingsModal: React.FC<QbtSettingsModalProps> = ({
 }) => {
   if (!isOpen || !settings) return null;
 
-  const [isExternal, setIsExternal] = useState(settings.isExternal);
-  const [host, setHost] = useState(settings.host);
-  const [username, setUsername] = useState(settings.username);
-  const [password, setPassword] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [testSuccess, setTestSuccess] = useState(false);
 
@@ -98,7 +89,7 @@ export const QbtSettingsModal: React.FC<QbtSettingsModalProps> = ({
               <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
               <div>
                 <p className="text-xs font-bold text-slate-200">
-                  {isExternal ? 'External qBittorrent Mode' : 'Integrated VPS qBittorrent'}
+                  Integrated VPS qBittorrent
                 </p>
                 <p className="text-[11px] text-slate-400 font-mono">
                   {settings.version || 'Unknown version'} • Status: {settings.connected ? 'Connected' : 'Disconnected'}
@@ -110,94 +101,21 @@ export const QbtSettingsModal: React.FC<QbtSettingsModalProps> = ({
             </span>
           </div>
 
-          {/* Engine Mode Switcher */}
+          {/* Integrated VPS qBittorrent */}
           <div className="space-y-2">
             <label className="text-xs font-semibold text-slate-300">
-              Orchestration Backend
+              qBittorrent Engine
             </label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setIsExternal(false)}
-                className={`p-3 rounded-xl border text-left transition ${
-                  !isExternal
-                    ? 'bg-cyan-950/40 border-cyan-500/50 text-slate-200'
-                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
-                }`}
-              >
-                <p className="text-xs font-bold flex items-center gap-1.5">
-                  <Zap className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Native Engine</span>
-                </p>
-                <p className="text-[10px] text-slate-400 mt-1">
-                  Built-in zero-config WebAPI v2 engine with maximum server speed.
-                </p>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsExternal(true)}
-                className={`p-3 rounded-xl border text-left transition ${
-                  isExternal
-                    ? 'bg-cyan-950/40 border-cyan-500/50 text-slate-200'
-                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
-                }`}
-              >
-                <p className="text-xs font-bold flex items-center gap-1.5">
-                  <Server className="w-3.5 h-3.5 text-blue-400" />
-                  <span>External qBt Host</span>
-                </p>
-                <p className="text-[10px] text-slate-400 mt-1">
-                  Connect to dedicated remote qBittorrent WebUI instance.
-                </p>
-              </button>
+            <div className="p-3.5 rounded-xl bg-cyan-950/30 border border-cyan-500/40">
+              <p className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                <Zap className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Integrated VPS qBittorrent</span>
+              </p>
+              <p className="text-[10px] text-slate-400 mt-1">
+                qBittorrent runs privately on this Oracle VPS and is controlled by SeedFlow through its WebAPI.
+              </p>
             </div>
           </div>
-
-          {/* External Host fields (if selected) */}
-          {isExternal && (
-            <div className="space-y-3 p-4 rounded-xl bg-slate-950 border border-slate-800">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  qBittorrent WebUI URL
-                </label>
-                <input
-                  type="text"
-                  value={host}
-                  onChange={(e) => setHost(e.target.value)}
-                  placeholder="http://192.168.1.100:8080"
-                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Username
-                  </label>
-                  <input
-                    type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder="admin"
-                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Password
-                  </label>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Active WebAPI Endpoints Overview */}
           <div className="space-y-2">
