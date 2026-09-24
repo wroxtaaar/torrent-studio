@@ -225,22 +225,90 @@ async function torrentExists(hash: string): Promise<boolean> {
 }
 
 async function addTorrentForMetadata(urls: string, category: string): Promise<string[]> {
+  const source = String(urls || '').trim();
   const form = new URLSearchParams();
-  form.set('urls', urls);
-  if (category) form.set('category', category);
   form.set('savepath', '/downloads');
   form.set('autoTMM', 'false');
-
-  // Mirror the working Python Telegram bot: let qBittorrent start the
-  // magnet normally, but stop it as soon as metadata is received.
-  // This allows the BitTorrent engine to fetch magnet metadata while
-  // preventing the payload from downloading before file selection.
   form.set('stopCondition', 'MetadataReceived');
+  if (category) form.set('category', category);
 
+  // Magnet URIs can be handed directly to qBittorrent. Search results may
+  // instead point at a protected Prowlarr download endpoint, so download the
+  // .torrent bytes server-side and upload them to qBittorrent. This keeps API
+  // keys out of the browser and avoids relying on qBittorrent's handling of a
+  // remote .torrent URL.
+  if (/^https?:\/\//i.test(source)) {
+    const response = await fetch(source, {
+      headers: { 'Accept': 'application/x-bittorrent, application/octet-stream, */*' },
+    });
+
+    const data = Buffer.from(await response.arrayBuffer());
+    if (!response.ok) {
+      const text = data.toString('utf8').slice(0, 1000);
+      throw Object.assign(
+        new Error(text || `Unable to retrieve torrent file (HTTP ${response.status})`),
+        { status: response.status }
+      );
+    }
+
+    if (!data.length) {
+      throw new Error('The search result returned an empty torrent file.');
+    }
+
+    if (data.length > 50 * 1024 * 1024) {
+      throw new Error('The torrent descriptor is unexpectedly large and was rejected.');
+    }
+
+    let decoded: any;
+    try {
+      decoded = bencode.decode(data);
+    } catch {
+      throw new Error('The search result did not return a valid .torrent file.');
+    }
+
+    if (!decoded?.info) {
+      throw new Error('The search result torrent is missing its info dictionary.');
+    }
+
+    const infoHash = crypto.createHash('sha1')
+      .update(bencode.encode(decoded.info))
+      .digest('hex')
+      .toLowerCase();
+
+    const upload = new FormData();
+    upload.append(
+      'torrents',
+      new Blob([data], { type: 'application/x-bittorrent' }),
+      'search-result.torrent'
+    );
+    upload.append('savepath', '/downloads');
+    upload.append('autoTMM', 'false');
+    upload.append('stopCondition', 'MetadataReceived');
+    if (category) upload.append('category', category);
+
+    const upstream = await qbtFetch('/api/v2/torrents/add', {
+      method: 'POST',
+      body: upload,
+    });
+
+    console.log('[QBT-PROXY] uploaded search torrent:', infoHash, upstream);
+
+    const addedIds = Array.isArray(upstream?.added_torrent_ids)
+      ? upstream.added_torrent_ids.map((id: any) => String(id))
+      : [];
+
+    return addedIds.length ? addedIds : [infoHash];
+  }
+
+  const sourceHash = extractInfoHash(source);
   const upstream = await qbtJson('/api/v2/torrents/add', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: form,
+    body: (() => {
+      const magnetForm = new URLSearchParams(form);
+      magnetForm.set('urls', source);
+      return magnetForm;
+    })(),
   });
 
   console.log('[QBT-PROXY] metadata add response:', upstream);
@@ -249,7 +317,6 @@ async function addTorrentForMetadata(urls: string, category: string): Promise<st
     ? upstream.added_torrent_ids.map((id: any) => String(id))
     : [];
 
-  const sourceHash = extractInfoHash(urls);
   const hashes = addedIds.length ? addedIds : (sourceHash ? [sourceHash] : []);
 
   if (!hashes.length) {
