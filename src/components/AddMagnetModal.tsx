@@ -94,14 +94,14 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     return 'other';
   };
 
-  const applyFileList = (files: { index: number; name: string; size: number; path?: string; type?: string }[]) => {
+  const applyFileList = (files: { index: number; name: string; size: number; path?: string; type?: string; priority?: number }[]) => {
     setInspectedFiles(
       files.map((f) => ({
         index: Number(f.index),
         name: f.name,
         size: Number(f.size || 0),
         type: (f.type as InspectFileItem['type']) || classifyFileType(f.name),
-        selected: false
+        selected: Number(f.priority ?? 0) > 0
       }))
     );
     setCustomFileCount(files.length);
@@ -156,7 +156,8 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
                 name: f.name,
                 size: f.size,
                 path: f.path,
-                type: classifyFileType(f.name)
+                type: classifyFileType(f.name),
+                priority: f.priority
               }))
             );
             setInspectionSource('✓ qBittorrent file metadata loaded • Torrent is paused');
