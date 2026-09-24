@@ -1,3 +1,5 @@
+import bencode from 'bencode';
+import crypto from 'crypto';
 import type { Express, Request, Response, NextFunction } from 'express';
 
 type QbtConfig = {
@@ -320,41 +322,40 @@ export function installQbtProxy(app: Express) {
         const filename = String((req.body as any)?.filename || 'upload.torrent');
         if (!base64) return res.status(400).json({ error: 'No torrent file provided' });
 
-        let buffer: Buffer;
-        try {
-          buffer = Buffer.from(base64, 'base64');
-        } catch {
-          return res.status(400).json({ error: 'Invalid base64 torrent file' });
-        }
+        const buffer = Buffer.from(base64, 'base64');
         if (!buffer.length) return res.status(400).json({ error: 'Empty torrent file' });
+
+        let decoded: any;
+        try { decoded = bencode.decode(buffer); }
+        catch { return res.status(400).json({ error: 'Invalid bencoded torrent file' }); }
+        if (!decoded?.info) return res.status(400).json({ error: 'Invalid torrent file: missing info dictionary' });
+
+        const infoEncoded = bencode.encode(decoded.info);
+        const hash = crypto.createHash('sha1').update(infoEncoded).digest('hex');
+        const name = decoded.info.name ? Buffer.from(decoded.info.name).toString('utf8') : filename.replace(/\.torrent$/i,'');
+        const rawFiles = Array.isArray(decoded.info.files) ? decoded.info.files : [];
+        const files = rawFiles.length
+          ? rawFiles.map((f: any, index: number) => {
+              const parts = Array.isArray(f.path) ? f.path.map((p:any)=>Buffer.from(p).toString('utf8')) : [Buffer.from(f.path || '').toString('utf8')];
+              const fileName = parts.join('/');
+              return { index, name: fileName.split('/').pop() || fileName, size: Number(f.length || 0), path: fileName, type: 'other' };
+            })
+          : [{ index: 0, name, size: Number(decoded.info.length || 0), path: name, type: 'other' }];
 
         const upload = new FormData();
         upload.append('torrents', new Blob([buffer], { type: 'application/x-bittorrent' }), filename);
         upload.append('savepath', '/downloads');
-        const response = await qbtFetch('/api/v2/torrents/add', {
-          method: 'POST',
-          body: upload,
-        });
+        const response = await qbtFetch('/api/v2/torrents/add', { method: 'POST', body: upload });
         const bodyText = await response.text();
-        if (!response.ok) {
-          throw Object.assign(new Error(bodyText || response.statusText), { status: response.status });
-        }
-        if (bodyText && bodyText.trim() !== 'Ok.') return res.status(502).json({ error: bodyText });
-        
-        // Return the real torrent metadata once qBittorrent has accepted it.
-        let parsed: any = null;
-        try {
-          const decoded = Buffer.from(buffer);
-          // The UI only needs a stable acknowledgement here; it will refresh
-          // the real torrent list immediately after this call.
-          parsed = { name: filename };
-        } catch {}
+        if (!response.ok) throw Object.assign(new Error(bodyText || response.statusText), { status: response.status });
+        if (bodyText.trim() && bodyText.trim() !== 'Ok.') return res.status(502).json({ error: bodyText });
+
         return res.json({
-          name: filename.replace(/\.torrent$/i, ''),
-          hash: '',
-          files: [],
-          totalSize: 0,
-          magnetUri: '',
+          name,
+          hash,
+          files,
+          totalSize: files.reduce((sum: number, f: any) => sum + f.size, 0),
+          magnetUri: `magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(name)}`,
           accepted: true,
           source: 'qBittorrent'
         });
