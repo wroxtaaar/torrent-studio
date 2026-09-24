@@ -197,7 +197,7 @@ export const FilePrioModal: React.FC<FilePrioModalProps> = ({
                 <div className="flex items-center gap-2 shrink-0">
                   {file.progress >= 1 && !isExcluded && (
                     <a
-                      href={`/api/files/download/file_${torrent.hash.slice(0, 8)}_${file.index}`}
+                      href={`/api/torrents/download/${torrent.hash}/${file.index}`}
                       download={file.name}
                       className="px-2 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold flex items-center gap-1 transition"
                       title="Download file to device"
