@@ -32,7 +32,8 @@ interface AddMagnetModalProps {
     magnet: string,
     category: string,
     selectedFiles?: number[],
-    manifest?: { name: string; size: number; priority: number }[]
+    manifest?: { name: string; size: number; priority: number }[],
+    existingHash?: string
   ) => Promise<void>;
   defaultFolder?: string;
   initialMagnet?: string;
@@ -65,6 +66,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
   const [showManifestEditor, setShowManifestEditor] = useState(false);
   const [customFileCount, setCustomFileCount] = useState<number>(16);
   const [pasteManifestText, setPasteManifestText] = useState('');
+  const [inspectedHash, setInspectedHash] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inspectTimeoutRef = useRef<any>(null);
@@ -78,6 +80,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       // If modal opens empty, start clean so user pastes their real link
       if (!magnetInput) {
         setInspectedFiles([]);
+        setInspectedHash('');
       }
     }
   }, [isOpen]);
@@ -123,6 +126,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       const data = await api.inspectMagnet(source, category);
 
       if (data && Array.isArray(data.files) && data.files.length > 0) {
+        setInspectedHash(String(data.hash || '').trim().toLowerCase());
         applyFileList(data.files);
         setInspectionSource('✓ qBittorrent file metadata loaded • Torrent remains paused until you select files');
         return;
@@ -145,6 +149,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
         try {
           const files = await api.getTorrentFiles(hash);
           if (files.length > 0) {
+            setInspectedHash(hash);
             applyFileList(
               files.map((f) => ({
                 index: f.index,
@@ -196,6 +201,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     setMagnetInput(val);
     setError('');
     setInspectedFiles([]);
+    setInspectedHash('');
     setInspectionSource('');
     if (inspectTimeoutRef.current) clearTimeout(inspectTimeoutRef.current);
   };
@@ -210,6 +216,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       setError('');
       const data = await api.uploadTorrentFile(file);
       setMagnetInput(data.magnetUri);
+      setInspectedHash(String(data.hash || '').trim().toLowerCase());
       setInspectedFiles(
         data.files.map((f) => ({
           index: f.index,
@@ -288,7 +295,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     try {
       setIsLoading(true);
       setError('');
-      await onAdd(magnetInput.trim(), category, selectedFileIndexes, manifest);
+      await onAdd(magnetInput.trim(), category, selectedFileIndexes, manifest, inspectedHash || undefined);
       onClose();
     } catch (err: any) {
       setError(err.message || 'Failed to start cloud torrent download');
