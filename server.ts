@@ -429,7 +429,7 @@ async function main() {
     log('download','File Downloaded',f.path,'info');
     sendFile(req,res,physicalFromRelative(f.path.slice(1)),true);
   });
-  app.get('/api/files/stream/:id', (req,res)=>{
+  app.get('/api/files/stream/:id', async (req,res)=>{
     const f = scanFiles().find(x=>x.id===req.params.id);
     if (!f) return res.status(404).send('File not found');
 
