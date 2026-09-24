@@ -338,9 +338,18 @@ export function installQbtProxy(app: Express) {
           ? rawFiles.map((f: any, index: number) => {
               const parts = Array.isArray(f.path) ? f.path.map((p:any)=>Buffer.from(p).toString('utf8')) : [Buffer.from(f.path || '').toString('utf8')];
               const fileName = parts.join('/');
-              return { index, name: fileName.split('/').pop() || fileName, size: Number(f.length || 0), path: fileName, type: 'other' };
+              const lower = fileName.toLowerCase();
+              const type = /\\.(mp4|mkv|m4v|webm|mov|avi)$/.test(lower) ? 'video' :
+                /\\.(mp3|wav|flac|aac|ogg|m4a)$/.test(lower) ? 'audio' :
+                /\\.(zip|rar|7z|tar|gz|iso)$/.test(lower) ? 'archive' :
+                /\\.(pdf|txt|md|json|csv|srt|vtt)$/.test(lower) ? 'document' : 'other';
+              return { index, name: fileName.split('/').pop() || fileName, size: Number(f.length || 0), path: fileName, type };
             })
-          : [{ index: 0, name, size: Number(decoded.info.length || 0), path: name, type: 'other' }];
+          : [{ index: 0, name, size: Number(decoded.info.length || 0), path: name,
+              type: /\\.(mp4|mkv|m4v|webm|mov|avi)$/i.test(name) ? 'video' :
+                /\\.(mp3|wav|flac|aac|ogg|m4a)$/i.test(name) ? 'audio' :
+                /\\.(zip|rar|7z|tar|gz|iso)$/i.test(name) ? 'archive' :
+                /\\.(pdf|txt|md|json|csv|srt|vtt)$/i.test(name) ? 'document' : 'other' }];
 
         const trackerValues: string[] = [];
         const addTracker = (value: any) => {
