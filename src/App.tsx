@@ -449,6 +449,14 @@ export default function App() {
   const activeDownloadsCount = torrents.filter(t => t.state === 'downloading').length;
   const unreadNotifsCount = notifications.filter(n => !n.read).length;
 
+  const currentFolderPrefix = currentFolder === '/' ? '/' : currentFolder + '/';
+  const visibleFolders = folders
+    .filter(folder => folder.path !== '/' && folder.path.startsWith(currentFolderPrefix))
+    .filter(folder => {
+      const remainder = folder.path.slice(currentFolderPrefix.length);
+      return remainder.length > 0 && !remainder.includes('/');
+    });
+
   return (
     <div className={`min-h-screen flex flex-col ${theme === 'dark' ? 'bg-slate-950 text-slate-100' : theme === 'dim' ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'} transition-colors duration-200`}>
       {/* Top Main Navigation Header */}
@@ -809,16 +817,34 @@ export default function App() {
               </div>
             </div>
 
-            {/* Files Grid / List */}
-            {files.length === 0 ? (
-              <div className="py-16 text-center rounded-2xl bg-slate-900 border border-slate-800 p-8">
-                <Folder className="w-12 h-12 text-slate-700 mx-auto mb-3" />
-                <h3 className="text-sm font-bold text-slate-300">No files found in this folder</h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  Completed torrent downloads and uploaded media appear here instantly.
-                </p>
+            {/* Folders and Files */}
+            {visibleFolders.length > 0 && (
+              <div className="grid grid-cols-1 gap-2.5">
+                {visibleFolders.map((folder) => (
+                  <button
+                    key={folder.id}
+                    type="button"
+                    onClick={() => setCurrentFolder(folder.path)}
+                    className="w-full p-3.5 rounded-2xl bg-slate-900 border border-slate-800 hover:border-cyan-500/40 hover:bg-slate-900/80 transition shadow-sm flex items-center gap-3 text-left group"
+                  >
+                    <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/20 shrink-0">
+                      <Folder className="w-5 h-5 text-cyan-400" />
+                    </div>
+                    <div className="truncate flex-1">
+                      <h4 className="text-sm font-semibold text-slate-200 truncate group-hover:text-cyan-400 transition">
+                        {folder.name}
+                      </h4>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        {folder.filesCount || 0} files • {formatBytes(folder.totalSize || 0)}
+                      </p>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-cyan-400 shrink-0" />
+                  </button>
+                ))}
               </div>
-            ) : (
+            )}
+
+            {files.length > 0 && (
               <div className="grid grid-cols-1 gap-2.5">
                 {files.map((file) => (
                   <FileCard
@@ -835,6 +861,16 @@ export default function App() {
                     canDelete={activeUser?.role === 'admin'}
                   />
                 ))}
+              </div>
+            )}
+
+            {visibleFolders.length === 0 && files.length === 0 && (
+              <div className="py-16 text-center rounded-2xl bg-slate-900 border border-slate-800 p-8">
+                <Folder className="w-12 h-12 text-slate-700 mx-auto mb-3" />
+                <h3 className="text-sm font-bold text-slate-300">No files found in this folder</h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Completed torrent downloads and uploaded media appear here instantly.
+                </p>
               </div>
             )}
           </div>
