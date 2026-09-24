@@ -155,11 +155,16 @@ const cleanupSettings: CleanupSettings = {
 
 // qBittorrent Configuration
 const qbtSettings: QbtSettings = {
-  isExternal: false,
-  host: 'http://localhost:8080',
-  username: 'admin',
-  connected: true,
-  version: 'v4.6.5 (WebAPI v2.9.3)'
+  isExternal: true,
+  host: process.env.QBT_URL || process.env.QBITTORRENT_URL || 'http://localhost:8080',
+  username: process.env.QBT_USERNAME || process.env.QBITTORRENT_USERNAME || '',
+  connected: Boolean(
+    process.env.QBT_API_KEY ||
+    process.env.QBITTORRENT_API_KEY ||
+    (process.env.QBT_USERNAME && process.env.QBT_PASSWORD) ||
+    (process.env.QBITTORRENT_USERNAME && process.env.QBITTORRENT_PASSWORD)
+  ),
+  version: 'External qBittorrent'
 };
 
 // Torrents state
