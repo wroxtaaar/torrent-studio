@@ -201,6 +201,7 @@ async function inspectMetadata(source: string) {
     });
 
     const text = await response.text();
+    console.log(`[QBT-PROXY] fetchMetadata attempt ${i + 1}/20 -> HTTP ${response.status}: ${text.slice(0, 500)}`);
 
     // 202 is expected while qBittorrent is fetching magnet metadata.
     if (response.status !== 200 && response.status !== 202) {
