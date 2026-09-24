@@ -21,13 +21,14 @@ const defaultDownloadsDir = fs.existsSync(path.resolve(process.cwd(), 'downloads
   : path.join(STORAGE_DIR, 'downloads');
 const DOWNLOADS_DIR = path.resolve(process.env.DOWNLOADS_DIR || defaultDownloadsDir);
 const META_DIR = path.join(STORAGE_DIR, 'meta');
+const STREAM_CACHE_DIR = path.join(STORAGE_DIR, 'stream-cache');
 const USERS_FILE = path.join(META_DIR, 'users.json');
 const FOLDERS_FILE = path.join(META_DIR, 'folders.json');
 const LOGS_FILE = path.join(META_DIR, 'logs.json');
 const NOTIFICATIONS_FILE = path.join(META_DIR, 'notifications.json');
 const CLEANUP_FILE = path.join(META_DIR, 'cleanup.json');
 
-for (const dir of [STORAGE_DIR, DOWNLOADS_DIR, META_DIR]) fs.mkdirSync(dir, { recursive: true });
+for (const dir of [STORAGE_DIR, DOWNLOADS_DIR, META_DIR, STREAM_CACHE_DIR]) fs.mkdirSync(dir, { recursive: true });
 
 const qbtBase = (process.env.QBT_URL || process.env.QBITTORRENT_URL || 'http://qbittorrent:8080').replace(/\/$/, '');
 const qbtUser = process.env.QBT_USERNAME || process.env.QBITTORRENT_USERNAME || '';
@@ -285,6 +286,97 @@ function resolveQbtDownloadPath(torrent: any, qbtFile: any): string | null {
   return null;
 }
 
+const streamPreparation = new Map<string, Promise<string>>();
+
+function streamCachePath(sourcePath: string) {
+  const stat = fs.statSync(sourcePath);
+  const key = crypto
+    .createHash('sha256')
+    .update(sourcePath)
+    .update(String(stat.size))
+    .update(String(stat.mtimeMs))
+    .digest('hex');
+  return path.join(STREAM_CACHE_DIR, key + '.mp4');
+}
+
+async function runFfmpeg(args: string[]): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const ffmpeg = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...args], {
+      stdio: ['ignore', 'ignore', 'pipe']
+    });
+
+    let stderr = '';
+    ffmpeg.stderr.on('data', chunk => {
+      stderr += chunk.toString();
+      if (stderr.length > 6000) stderr = stderr.slice(-6000);
+    });
+
+    ffmpeg.on('error', reject);
+    ffmpeg.on('close', code => {
+      if (code === 0) return resolve();
+      reject(new Error(stderr.trim() || `ffmpeg exited with code ${code}`));
+    });
+  });
+}
+
+async function prepareBrowserVideo(sourcePath: string): Promise<string> {
+  const cached = streamCachePath(sourcePath);
+  if (fs.existsSync(cached) && fs.statSync(cached).size > 0) return cached;
+
+  const existing = streamPreparation.get(cached);
+  if (existing) return existing;
+
+  const job = (async () => {
+    const temp = cached + '.tmp';
+    fs.rmSync(temp, { force: true });
+
+    // First try a fast remux: this preserves quality and is usually very fast
+    // for H.264/AAC MKV files. The resulting MP4 is seekable and has real duration.
+    try {
+      await runFfmpeg([
+        '-i', sourcePath,
+        '-map', '0:v:0',
+        '-map', '0:a:0?',
+        '-c', 'copy',
+        '-movflags', '+faststart',
+        '-f', 'mp4',
+        temp
+      ]);
+    } catch (remuxError) {
+      console.warn('[STREAM] Fast remux failed, transcoding:', remuxError);
+      fs.rmSync(temp, { force: true });
+
+      await runFfmpeg([
+        '-i', sourcePath,
+        '-map', '0:v:0',
+        '-map', '0:a:0?',
+        '-c:v', 'libx264',
+        '-preset', 'veryfast',
+        '-crf', '23',
+        '-c:a', 'aac',
+        '-b:a', '160k',
+        '-movflags', '+faststart',
+        '-f', 'mp4',
+        temp
+      ]);
+    }
+
+    if (!fs.existsSync(temp) || fs.statSync(temp).size === 0) {
+      throw new Error('ffmpeg produced an empty streaming file');
+    }
+
+    fs.renameSync(temp, cached);
+    return cached;
+  })();
+
+  streamPreparation.set(cached, job);
+  try {
+    return await job;
+  } finally {
+    streamPreparation.delete(cached);
+  }
+}
+
 function sendFile(req: Request, res: Response, fullPath: string, download: boolean) {
   if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) return res.status(404).send('File not found');
   const st = fs.statSync(fullPath); const size = st.size;
@@ -349,58 +441,21 @@ async function main() {
     log('stream','File Streamed',f.path,'info');
 
     const ext = path.extname(fullPath).toLowerCase();
-    // Browsers do not reliably play Matroska/AVI/TS containers. Convert
-    // these on the VPS to fragmented MP4 for HTML5 playback.
-    const needsTranscode = ['.mkv', '.avi', '.flv', '.ts', '.m2ts'].includes(ext);
+    const needsBrowserConversion = ['.mkv', '.avi', '.flv', '.ts', '.m2ts'].includes(ext);
 
-    if (!needsTranscode) {
+    if (!needsBrowserConversion) {
       return sendFile(req,res,fullPath,false);
     }
 
-    res.setHeader('Content-Type','video/mp4');
-    res.setHeader('Cache-Control','no-cache');
-    res.setHeader('Accept-Ranges','none');
-
-    const ffmpeg = spawn('ffmpeg', [
-      '-hide_banner',
-      '-loglevel', 'error',
-      '-i', fullPath,
-      '-map', '0:v:0',
-      '-map', '0:a:0?',
-      '-c:v', 'libx264',
-      '-preset', 'veryfast',
-      '-crf', '23',
-      '-c:a', 'aac',
-      '-b:a', '160k',
-      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
-      '-f', 'mp4',
-      'pipe:1'
-    ], { stdio: ['ignore', 'pipe', 'pipe'] });
-
-    let stderr = '';
-    ffmpeg.stderr.on('data', chunk => {
-      stderr += chunk.toString();
-      if (stderr.length > 4000) stderr = stderr.slice(-4000);
-    });
-
-    req.on('close', () => {
-      if (!ffmpeg.killed) ffmpeg.kill('SIGKILL');
-    });
-
-    ffmpeg.on('error', error => {
-      console.error('[STREAM] ffmpeg start failed:', error);
-      if (!res.headersSent) res.status(500).send('Server-side streaming requires ffmpeg on the VPS.');
-      else res.end();
-    });
-
-    ffmpeg.on('close', code => {
-      if (code !== 0 && stderr.trim()) {
-        console.error(`[STREAM] ffmpeg exited with code ${code}: ${stderr.trim()}`);
-      }
-      if (!res.writableEnded) res.end();
-    });
-
-    ffmpeg.stdout.pipe(res);
+    try {
+      // Build/cache a real seekable MP4. The browser can then use normal
+      // HTTP Range requests, so duration and forward/backward seeking work.
+      const browserVideo = await prepareBrowserVideo(fullPath);
+      return sendFile(req,res,browserVideo,false);
+    } catch (error) {
+      console.error('[STREAM] Failed to prepare browser video:', error);
+      return res.status(500).send('Unable to prepare this video for browser streaming.');
+    }
   });
 
   app.post('/api/files/zip',(req,res)=>{
