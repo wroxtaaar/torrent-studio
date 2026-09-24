@@ -22,8 +22,6 @@ export const QbtSettingsModal: React.FC<QbtSettingsModalProps> = ({
   settings,
   onSave
 }) => {
-  if (!isOpen || !settings) return null;
-
   const [isSaving, setIsSaving] = useState(false);
   const [testSuccess, setTestSuccess] = useState(false);
 
@@ -41,14 +39,12 @@ export const QbtSettingsModal: React.FC<QbtSettingsModalProps> = ({
     }
   };
 
+  if (!isOpen || !settings) return null;
+
   const handleSave = async () => {
     try {
       setIsSaving(true);
-      await onSave({
-        isExternal,
-        host,
-        username
-      });
+      await onSave({ isExternal: false });
       onClose();
     } catch (e) {
       console.error(e);
