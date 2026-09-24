@@ -1,17 +1,13 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Download,
-  Upload,
   Pause,
   Play,
   Trash2,
   FileCheck,
   CheckCircle2,
   Clock,
-  Users,
-  Activity,
-  ChevronRight,
-  FolderDown
+  Users
 } from 'lucide-react';
 import { TorrentItem } from '../types/index.ts';
 import { formatBytes, formatSpeed, formatETA } from '../utils/formatters.ts';
@@ -31,16 +27,56 @@ export const TorrentCard: React.FC<TorrentCardProps> = ({
   onDelete,
   onSelectFiles
 }) => {
+  const [isActionPending, setIsActionPending] = useState(false);
+
   const isCompleted = torrent.state === 'completed' || torrent.progress >= 1;
   const isDownloading = torrent.state === 'downloading';
+  const isStalled = torrent.state === 'stalledDL';
   const isPaused = torrent.state === 'pausedDL';
+  const canPause = isDownloading || isStalled;
+  const canResume = isPaused;
 
   const totalFiles = torrent.files?.length || 1;
   const activeFiles = torrent.files ? torrent.files.filter(f => f.priority > 0).length : totalFiles;
   const skippedFiles = totalFiles - activeFiles;
-  const downloadTargetSize = torrent.selected_size && torrent.selected_size > 0 ? torrent.selected_size : torrent.total_size;
+  const downloadTargetSize =
+    torrent.selected_size && torrent.selected_size > 0
+      ? torrent.selected_size
+      : torrent.total_size;
 
   const progressPercent = Math.round(torrent.progress * 1000) / 10;
+
+  const statusLabel =
+    isCompleted ? 'Completed' :
+    isPaused ? 'Paused' :
+    isStalled ? 'Stalled' :
+    torrent.state === 'checkingDL' ? 'Checking' :
+    torrent.state === 'error' ? 'Error' :
+    torrent.state === 'uploading' ? 'Seeding' :
+    torrent.state;
+
+  const statusClass =
+    isCompleted
+      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+      : isPaused
+      ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+      : isStalled
+      ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20'
+      : isDownloading
+      ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 animate-pulse'
+      : torrent.state === 'error'
+      ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+      : 'bg-slate-800 text-slate-400';
+
+  const handleTransferAction = async (action: () => Promise<void>) => {
+    if (isActionPending) return;
+    setIsActionPending(true);
+    try {
+      await action();
+    } finally {
+      setIsActionPending(false);
+    }
+  };
 
   return (
     <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-slate-700/80 transition shadow-lg flex flex-col gap-3 group">
@@ -49,21 +85,18 @@ export const TorrentCard: React.FC<TorrentCardProps> = ({
         <div className="overflow-hidden flex-1">
           <div className="flex items-center gap-2">
             <span
-              className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                isCompleted
-                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                  : isDownloading
-                  ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 animate-pulse'
-                  : 'bg-slate-800 text-slate-400'
-              }`}
+              className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${statusClass}`}
             >
-              {torrent.state}
+              {statusLabel}
             </span>
             <span className="text-[11px] text-slate-500 font-medium">
               {torrent.category || 'Downloads'}
             </span>
           </div>
-          <h3 className="text-sm font-semibold text-slate-100 mt-1 truncate group-hover:text-cyan-400 transition" title={torrent.name}>
+          <h3
+            className="text-sm font-semibold text-slate-100 mt-1 truncate group-hover:text-cyan-400 transition"
+            title={torrent.name}
+          >
             {torrent.name}
           </h3>
         </div>
@@ -78,7 +111,9 @@ export const TorrentCard: React.FC<TorrentCardProps> = ({
           >
             <FileCheck className="w-4 h-4 text-cyan-400" />
             <span className="hidden sm:inline text-xs">
-              {skippedFiles > 0 ? `${activeFiles}/${totalFiles} files (${skippedFiles} skipped)` : `${totalFiles} files`}
+              {skippedFiles > 0
+                ? `${activeFiles}/${totalFiles} files (${skippedFiles} skipped)`
+                : `${totalFiles} files`}
             </span>
           </button>
 
@@ -86,7 +121,11 @@ export const TorrentCard: React.FC<TorrentCardProps> = ({
           {isCompleted && (
             <a
               href={`/api/torrents/download/${torrent.hash}`}
-              download={activeFiles === 1 ? (torrent.files.find(f => f.priority > 0)?.name || torrent.name) : `${torrent.name}.zip`}
+              download={
+                activeFiles === 1
+                  ? (torrent.files.find(f => f.priority > 0)?.name || torrent.name)
+                  : `${torrent.name}.zip`
+              }
               className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 text-xs font-semibold transition tap-target flex items-center gap-1.5 justify-center"
               title={activeFiles === 1 ? 'Download Completed File' : 'Download All Files (.zip)'}
             >
@@ -98,20 +137,22 @@ export const TorrentCard: React.FC<TorrentCardProps> = ({
           )}
 
           {/* Pause / Resume */}
-          {isDownloading && (
+          {canPause && (
             <button
-              onClick={() => onPause(torrent.hash)}
-              className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition tap-target flex items-center justify-center"
+              disabled={isActionPending}
+              onClick={() => handleTransferAction(() => onPause(torrent.hash))}
+              className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition tap-target flex items-center justify-center disabled:opacity-50 disabled:cursor-wait"
               title="Pause Transfer"
             >
               <Pause className="w-4 h-4" />
             </button>
           )}
 
-          {isPaused && (
+          {canResume && (
             <button
-              onClick={() => onResume(torrent.hash)}
-              className="p-2 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 transition tap-target flex items-center justify-center"
+              disabled={isActionPending}
+              onClick={() => handleTransferAction(() => onResume(torrent.hash))}
+              className="p-2 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 transition tap-target flex items-center justify-center disabled:opacity-50 disabled:cursor-wait"
               title="Resume Transfer"
             >
               <Play className="w-4 h-4 fill-current" />
@@ -136,6 +177,10 @@ export const TorrentCard: React.FC<TorrentCardProps> = ({
             className={`h-full transition-all duration-300 ${
               isCompleted
                 ? 'bg-emerald-500'
+                : isPaused
+                ? 'bg-amber-500'
+                : isStalled
+                ? 'bg-orange-500'
                 : 'bg-gradient-to-r from-cyan-500 to-indigo-500'
             }`}
             style={{ width: `${progressPercent}%` }}
@@ -169,6 +214,20 @@ export const TorrentCard: React.FC<TorrentCardProps> = ({
                 {formatETA(torrent.eta)}
               </span>
             </>
+          )}
+
+          {isStalled && (
+            <span className="text-orange-400 flex items-center gap-1 font-sans">
+              <Clock className="w-3.5 h-3.5" />
+              Waiting for peers
+            </span>
+          )}
+
+          {isPaused && (
+            <span className="text-amber-400 flex items-center gap-1 font-sans">
+              <Pause className="w-3.5 h-3.5" />
+              Transfer paused
+            </span>
           )}
 
           {isCompleted && (
