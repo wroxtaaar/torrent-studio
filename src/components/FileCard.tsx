@@ -66,9 +66,9 @@ export const FileCard: React.FC<FileCardProps> = ({
   };
 
   return (
-    <div className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 hover:border-slate-700/80 transition shadow-sm flex items-center justify-between gap-3 group relative">
+    <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 hover:border-slate-700/80 transition shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 group relative">
       {/* File Info */}
-      <div className="flex items-center gap-3 overflow-hidden flex-1">
+      <div className="flex items-center gap-3 overflow-hidden flex-1 min-w-0 w-full">
         <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800/80 shrink-0">
           {getIcon()}
         </div>
@@ -99,7 +99,7 @@ export const FileCard: React.FC<FileCardProps> = ({
       </div>
 
       {/* Action Buttons */}
-      <div className="flex items-center gap-1.5 shrink-0">
+      <div className="flex items-center justify-end gap-1.5 shrink-0 w-full sm:w-auto">
         {/* Stream button for playable media */}
         {file.isStreamable && (
           <button
