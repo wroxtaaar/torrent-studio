@@ -287,10 +287,17 @@ async function addTorrentForMetadata(urls: string, category: string): Promise<st
     }
 
     // Prowlarr may resolve a search result to a magnet URI rather than a
-    // .torrent descriptor. In that case hand the magnet to qBittorrent using
-    // the same metadata-only flow as a normal magnet search.
+    // .torrent descriptor. If that magnet is already present in qBittorrent,
+    // reuse the existing torrent instead of attempting a duplicate add.
     const textResponse = data.toString('utf8').trim();
     if (/^magnet:\?/i.test(textResponse)) {
+      const magnetHash = extractInfoHash(textResponse);
+
+      if (magnetHash && await torrentExists(magnetHash)) {
+        console.log('[QBT-PROXY] search magnet already exists, reusing:', magnetHash);
+        return [magnetHash];
+      }
+
       const magnetForm = new URLSearchParams(form);
       magnetForm.set('urls', textResponse);
       const magnetResult = await qbtJson('/api/v2/torrents/add', {
@@ -304,7 +311,6 @@ async function addTorrentForMetadata(urls: string, category: string): Promise<st
       const addedIds = Array.isArray(magnetResult?.added_torrent_ids)
         ? magnetResult.added_torrent_ids.map((id: any) => String(id))
         : [];
-      const magnetHash = extractInfoHash(textResponse);
 
       if (!addedIds.length && !magnetHash) {
         throw Object.assign(
@@ -335,6 +341,14 @@ async function addTorrentForMetadata(urls: string, category: string): Promise<st
       .update(bencode.encode(decoded.info))
       .digest('hex')
       .toLowerCase();
+
+    // Search results can point to a torrent that was already inspected or
+    // downloaded previously. Reuse it instead of uploading the same .torrent
+    // again, which qBittorrent reports as Conflict.
+    if (await torrentExists(infoHash)) {
+      console.log('[QBT-PROXY] search .torrent already exists, reusing:', infoHash);
+      return [infoHash];
+    }
 
     const upload = new FormData();
     upload.append(
