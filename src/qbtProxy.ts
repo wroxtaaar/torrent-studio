@@ -47,7 +47,11 @@ async function qbtLogin(): Promise<void> {
     });
 
     const text = await response.text();
-    if (!response.ok || !/^Ok\.?$/i.test(text.trim())) {
+
+    // qBittorrent 5.2.x can return HTTP 204 with an empty body on a
+    // successful WebAPI login. Older versions may return HTTP 200 + "Ok.".
+    // The session cookie is the authoritative proof that login succeeded.
+    if (!response.ok) {
       throw Object.assign(
         new Error(text || response.statusText || 'qBittorrent login failed'),
         { status: response.status }
