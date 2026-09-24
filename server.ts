@@ -612,6 +612,20 @@ async function startServer() {
   // Real qBittorrent backend proxy. Unknown routes fall through to legacy UI APIs.
   installQbtProxy(app);
 
+  app.get('/health', (_req: Request, res: Response) => {
+    res.json({
+      ok: true,
+      qbtConfigured: Boolean(
+        process.env.QBT_API_KEY ||
+        process.env.QBITTORRENT_API_KEY ||
+        (process.env.QBT_USERNAME && process.env.QBT_PASSWORD) ||
+        (process.env.QBITTORRENT_USERNAME && process.env.QBITTORRENT_PASSWORD)
+      ),
+      qbtUrlConfigured: Boolean(process.env.QBT_URL || process.env.QBITTORRENT_URL),
+      port: PORT
+    });
+  });
+
   // --------------------------------------------------------------------------
   // 1. qBittorrent WebAPI v2 Specification Implementation
   // --------------------------------------------------------------------------
