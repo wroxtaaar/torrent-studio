@@ -37,6 +37,9 @@ const qbtUser = process.env.QBT_USERNAME || process.env.QBITTORRENT_USERNAME || 
 const qbtPassword = process.env.QBT_PASSWORD || process.env.QBITTORRENT_PASSWORD || '';
 const qbtApiKey = process.env.QBT_API_KEY || process.env.QBITTORRENT_API_KEY || '';
 
+const prowlarrBase = (process.env.PROWLARR_URL || 'http://prowlarr:9696').replace(/\/$/, '');
+const prowlarrApiKey = process.env.PROWLARR_API_KEY || '';
+
 function readJson<T>(file: string, fallback: T): T {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')) as T; } catch { return fallback; }
 }
@@ -273,6 +276,76 @@ async function qbtJson(pathname: string, init: RequestInit = {}) {
   const text = await r.text();
   if (!r.ok) throw Object.assign(new Error(text || r.statusText), { status: r.status });
   try { return text ? JSON.parse(text) : null; } catch { return text; }
+}
+
+async function searchTorrentIndexer(query: string, limit = 50, offset = 0) {
+  if (!prowlarrApiKey) {
+    throw Object.assign(
+      new Error('Torrent search is not configured. Set PROWLARR_API_KEY in .env.'),
+      { status: 503 }
+    );
+  }
+
+  const url = new URL('/api/v1/search', prowlarrBase);
+  url.searchParams.set('query', query);
+  url.searchParams.set('type', 'search');
+  url.searchParams.set('limit', String(Math.min(Math.max(limit, 1), 100)));
+  url.searchParams.set('offset', String(Math.max(offset, 0)));
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'Accept': 'application/json',
+        'X-Api-Key': prowlarrApiKey,
+      },
+      signal: controller.signal,
+    });
+
+    const text = await response.text();
+    if (!response.ok) {
+      let message = text || response.statusText;
+      try {
+        const parsed = text ? JSON.parse(text) : null;
+        message = parsed?.message || parsed?.error || message;
+      } catch {}
+      throw Object.assign(new Error(message || 'Prowlarr search failed'), { status: response.status });
+    }
+
+    let releases: any[] = [];
+    try {
+      const parsed = text ? JSON.parse(text) : [];
+      releases = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.results) ? parsed.results : [];
+    } catch {
+      throw Object.assign(new Error('Prowlarr returned an invalid search response.'), { status: 502 });
+    }
+
+    return releases
+      .filter((release: any) => String(release.protocol || 'torrent').toLowerCase() !== 'usenet')
+      .map((release: any) => {
+        const magnetUrl = String(release.magnetUrl || release.magneturl || '').trim();
+        const downloadUrl = String(release.downloadUrl || release.downloadurl || '').trim();
+        return {
+          guid: release.guid,
+          title: String(release.title || release.sortTitle || 'Untitled'),
+          size: Number(release.size || 0),
+          seeders: Number(release.seeders || 0),
+          leechers: Number(release.leechers || release.leecherCount || 0),
+          indexer: String(release.indexer || ''),
+          protocol: String(release.protocol || ''),
+          publishDate: release.publishDate || undefined,
+          infoHash: String(release.infoHash || ''),
+          magnetUrl: magnetUrl || undefined,
+          downloadUrl: downloadUrl || undefined,
+          infoUrl: String(release.infoUrl || '').trim() || undefined,
+          sourceUrl: magnetUrl || downloadUrl || undefined,
+        };
+      });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function storageStats(torrentCount: number): StorageStats {
@@ -631,6 +704,27 @@ async function main() {
   app.use((_req,res,next)=>{ res.setHeader('X-Powered-By','Torrent-Studio'); next(); });
 
   installQbtProxy(app);
+
+  app.get('/api/search/torrents', async (req,res)=>{
+    try {
+      const query = String(req.query.q || '').trim();
+      const limit = Number(req.query.limit || 50);
+      const offset = Number(req.query.offset || 0);
+
+      if (query.length < 2) {
+        return res.status(400).json({ error: 'Search query must be at least 2 characters.' });
+      }
+
+      const results = await searchTorrentIndexer(query, limit, offset);
+      return res.json({ results });
+    } catch (error: any) {
+      console.error('[SEARCH]', error?.message || error);
+      const status = Number(error?.status) || 502;
+      return res.status(status >= 400 && status < 600 ? status : 502).json({
+        error: error?.message || 'Torrent search failed.'
+      });
+    }
+  });
 
   app.get('/health', async (_req,res)=>{
     try {
