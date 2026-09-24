@@ -92,24 +92,29 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       setIsInspecting(true);
       setError('');
       const data = await api.inspectMagnet(link.trim());
-      if (data && data.files && data.files.length > 0) {
-        setInspectedFiles(
-          data.files.map((f) => ({
-            index: f.index,
-            name: f.name,
-            size: f.size,
-            type: (f.type as any) || 'other',
-            selected: false
-          }))
+      if (!data || !Array.isArray(data.files) || data.files.length === 0) {
+        throw new Error(
+          data?.message ||
+          'qBittorrent is still resolving this torrent. Please try Load File List again in a few seconds.'
         );
-        setCustomFileCount(data.files.length);
-        if (data.source === 'itorrents_cache') {
-          setInspectionSource('✓ Verified File Manifest (Real BitTorrent Metadata)');
-        } else if (data.source === 'apibay_metadata') {
-          setInspectionSource('✓ Verified File Manifest (Public Metadata Index)');
-        } else {
-          setInspectionSource('Active Metadata Breakdown');
-        }
+      }
+
+      setInspectedFiles(
+        data.files.map((f) => ({
+          index: f.index,
+          name: f.name,
+          size: f.size,
+          type: (f.type as any) || 'other',
+          selected: false
+        }))
+      );
+      setCustomFileCount(data.files.length);
+      if (data.source === 'itorrents_cache') {
+        setInspectionSource('✓ Verified File Manifest (Real BitTorrent Metadata)');
+      } else if (data.source === 'apibay_metadata') {
+        setInspectionSource('✓ Verified File Manifest (Public Metadata Index)');
+      } else {
+        setInspectionSource('Active Metadata Breakdown');
       }
     } catch (err: any) {
       console.warn('Inspect magnet error:', err);
@@ -474,11 +479,26 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
             </button>
             <button
               type="button"
-              onClick={handleSubmit}
-              disabled={isLoading || isInspecting || !magnetInput.trim() || inspectedFiles.length === 0 || selectedCount === 0}
+              onClick={() => {
+                if (selectedCount > 0) {
+                  void handleSubmit({ preventDefault: () => {} } as React.FormEvent);
+                } else if (magnetInput.trim() && !isInspecting) {
+                  void triggerInspect(magnetInput.trim());
+                }
+              }}
+              disabled={
+                isLoading ||
+                isInspecting ||
+                !magnetInput.trim() ||
+                (inspectedFiles.length > 0 && selectedCount === 0)
+              }
               className="px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 text-xs font-bold transition flex items-center gap-2 shadow-lg shadow-cyan-500/20"
             >
-              <FolderDown className="w-4 h-4" />
+              {isInspecting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <FolderDown className="w-4 h-4" />
+              )}
               <span>
                 {isLoading
                   ? 'Adding Task...'
@@ -487,7 +507,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
                   : isInspecting
                   ? 'Loading File List...'
                   : inspectedFiles.length === 0
-                  ? 'Waiting for File List...'
+                  ? 'Load File List'
                   : 'Select Files to Continue'}
               </span>
             </button>
