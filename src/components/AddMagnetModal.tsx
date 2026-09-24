@@ -35,6 +35,7 @@ interface AddMagnetModalProps {
     manifest?: { name: string; size: number; priority: number }[]
   ) => Promise<void>;
   defaultFolder?: string;
+  initialMagnet?: string;
 }
 
 interface InspectFileItem {
@@ -51,7 +52,8 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
   isOpen,
   onClose,
   onAdd,
-  defaultFolder = 'Downloads'
+  defaultFolder = 'Downloads',
+  initialMagnet = ''
 }) => {
   const [magnetInput, setMagnetInput] = useState('');
   const [category, setCategory] = useState(defaultFolder);
@@ -178,6 +180,17 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       setIsInspecting(false);
     }
   };
+
+  useEffect(() => {
+    if (!isOpen || !initialMagnet.trim()) return;
+
+    const source = initialMagnet.trim();
+    setMagnetInput(source);
+    setInspectedFiles([]);
+    setInspectionSource('');
+    setError('');
+    void triggerInspect(source);
+  }, [isOpen, initialMagnet]);
 
   const handleInputChange = (val: string) => {
     setMagnetInput(val);
