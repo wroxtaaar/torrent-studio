@@ -142,9 +142,8 @@ export const TorrentCard: React.FC<TorrentCardProps> = ({
           {/* Pause / Resume */}
           {canPause && (
             <button
-              disabled={isActionPending}
-              onClick={() => handleTransferAction(() => onPause(torrent.hash))}
-              className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition tap-target flex items-center justify-center disabled:opacity-50 disabled:cursor-wait"
+              onClick={() => void handleTransferAction(() => onPause(torrent.hash))}
+              className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition tap-target flex items-center justify-center"
               title="Pause Transfer"
             >
               <Pause className="w-4 h-4" />
@@ -153,9 +152,8 @@ export const TorrentCard: React.FC<TorrentCardProps> = ({
 
           {canResume && (
             <button
-              disabled={isActionPending}
-              onClick={() => handleTransferAction(() => onResume(torrent.hash))}
-              className="p-2 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 transition tap-target flex items-center justify-center disabled:opacity-50 disabled:cursor-wait"
+              onClick={() => void handleTransferAction(() => onResume(torrent.hash))}
+              className="p-2 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 transition tap-target flex items-center justify-center"
               title="Resume Transfer"
             >
               <Play className="w-4 h-4 fill-current" />
