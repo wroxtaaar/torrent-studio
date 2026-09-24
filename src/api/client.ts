@@ -35,7 +35,7 @@ export const api = {
     if (!res.ok) throw new Error('Failed to set file priority');
   },
 
-  async inspectMagnet(magnet: string): Promise<{
+  async inspectMagnet(magnet: string, category = 'Downloads'): Promise<{
     name: string;
     hash: string;
     files: { index: number; name: string; size: number; path: string; type: string }[];
@@ -47,7 +47,7 @@ export const api = {
     const res = await fetch('/api/v2/torrents/inspect-magnet', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ magnet })
+      body: JSON.stringify({ magnet, category })
     });
     const body = await res.text();
     let data: any = null;
