@@ -42,6 +42,7 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [mediaError, setMediaError] = useState('');
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -51,6 +52,22 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
 
   const isVideo = file.type === 'video';
   const mediaRef = isVideo ? videoRef : audioRef;
+
+  useEffect(() => {
+    setCurrentTime(0);
+    setDuration(0);
+    setIsPlaying(true);
+    setMediaError('');
+  }, [file?.id]);
+
+  const handleMediaError = () => {
+    const media = mediaRef.current;
+    const code = media && 'error' in media ? media.error?.code : undefined;
+    setMediaError(
+      code ? `Browser could not play this stream (media error ${code}).` : 'Unable to play this video stream.'
+    );
+    setIsPlaying(false);
+  };
 
   // Toggle play/pause
   const togglePlay = () => {
@@ -307,6 +324,16 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
 
         {/* Media Viewport */}
         <div className="relative flex-1 bg-black flex items-center justify-center min-h-[260px] md:min-h-[420px] overflow-hidden">
+          {mediaError && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center p-6 text-center">
+              <div className="max-w-md rounded-xl bg-slate-900/95 border border-rose-500/30 p-5">
+                <p className="text-sm font-semibold text-rose-300">{mediaError}</p>
+                <p className="text-xs text-slate-400 mt-2">
+                  The VPS prepares MKV files as browser-compatible MP4 for playback.
+                </p>
+              </div>
+            </div>
+          )}
           {isVideo ? (
             <video
               ref={videoRef}
@@ -316,6 +343,7 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
               onTimeUpdate={onTimeUpdate}
               onLoadedMetadata={onLoadedMetadata}
               onEnded={() => setIsPlaying(false)}
+              onError={handleMediaError}
             />
           ) : (
             <div className="flex flex-col items-center justify-center p-8 text-center gap-4">
