@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Search,
   Loader2,
@@ -44,6 +44,41 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
     }
   });
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadServerRecents = async () => {
+      try {
+        const response = await fetch('/api/search/recent');
+        if (!response.ok) return;
+        const data = await response.json();
+        const serverRecents = Array.isArray(data?.searches)
+          ? data.searches.filter((value: unknown): value is string => typeof value === 'string').slice(0, 10)
+          : [];
+
+        if (!cancelled && serverRecents.length > 0) {
+          setRecentSearches(prev => {
+            const merged = [...serverRecents, ...prev];
+            const next = merged.filter((item, index, arr) =>
+              arr.findIndex(v => v.toLowerCase() === item.toLowerCase()) === index
+            ).slice(0, 10);
+
+            try {
+              localStorage.setItem('seedflow_recent_searches', JSON.stringify(next));
+            } catch {}
+
+            return next;
+          });
+        }
+      } catch {}
+    };
+
+    void loadServerRecents();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const saveRecentSearch = (value: string) => {
     const normalized = value.trim();
     if (!normalized) return;
@@ -58,6 +93,12 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
         localStorage.setItem('seedflow_recent_searches', JSON.stringify(next));
       } catch {}
 
+      void fetch('/api/search/recent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ search: normalized })
+      }).catch(() => {});
+
       return next;
     });
   };
@@ -70,6 +111,14 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
       } catch {}
       return next;
     });
+  };
+
+  const clearRecentSearches = () => {
+    setRecentSearches([]);
+    try {
+      localStorage.removeItem('seedflow_recent_searches');
+    } catch {}
+    void fetch('/api/search/recent', { method: 'DELETE' }).catch(() => {});
   };
 
   const runSearch = async (event?: React.FormEvent) => {
@@ -175,20 +224,27 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
         </form>
 
         {recentSearches.length > 0 && (
-          <div className="mt-3 flex items-start gap-2">
-            <span className="shrink-0 pt-1 text-[11px] font-semibold text-slate-500">
-              Recent
-            </span>
-            <div className="flex flex-wrap gap-1.5">
+          <div className="mt-3 rounded-xl bg-slate-950/70 border border-slate-800 overflow-hidden">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800">
+              <span className="text-[11px] font-semibold text-slate-400">Recent Searches</span>
+              <button
+                type="button"
+                onClick={clearRecentSearches}
+                className="text-[10px] text-slate-500 hover:text-rose-400 transition"
+              >
+                Clear all
+              </button>
+            </div>
+            <div className="p-2 flex flex-wrap gap-1.5">
               {recentSearches.map(search => (
                 <div
                   key={search}
-                  className="flex items-center rounded-lg bg-slate-950 border border-slate-800 overflow-hidden"
+                  className="flex items-center rounded-lg bg-slate-900 border border-slate-800 overflow-hidden"
                 >
                   <button
                     type="button"
                     onClick={() => setQuery(search)}
-                    className="px-2.5 py-1.5 text-[11px] text-slate-300 hover:text-cyan-300 hover:bg-slate-900 transition max-w-[180px] truncate"
+                    className="px-2.5 py-2 text-[11px] text-slate-300 hover:text-cyan-300 hover:bg-slate-800 transition max-w-[180px] truncate"
                     title={`Use recent search: ${search}`}
                   >
                     {search}
@@ -196,7 +252,7 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
                   <button
                     type="button"
                     onClick={() => removeRecentSearch(search)}
-                    className="px-1.5 py-1.5 text-slate-600 hover:text-rose-400 hover:bg-slate-900 transition"
+                    className="px-2 py-2 text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition"
                     aria-label={`Remove ${search} from recent searches`}
                     title="Remove"
                   >
