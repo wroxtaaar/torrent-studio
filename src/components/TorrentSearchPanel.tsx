@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Search,
   Loader2,
@@ -29,6 +29,8 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
   const [isSearching, setIsSearching] = useState(false);
   const [searched, setSearched] = useState(false);
   const [error, setError] = useState('');
+  const [sortBy, setSortBy] = useState<'time' | 'size' | 'seeds'>('time');
+  const [sortDirection, setSortDirection] = useState<'desc' | 'asc'>('desc');
 
   const runSearch = async (event?: React.FormEvent) => {
     event?.preventDefault();
@@ -59,6 +61,31 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
       setIsSearching(false);
     }
   };
+
+  const sortedResults = useMemo(() => {
+    const sorted = [...results];
+
+    sorted.sort((a, b) => {
+      let aValue = 0;
+      let bValue = 0;
+
+      if (sortBy === 'time') {
+        aValue = a.publishDate ? new Date(a.publishDate).getTime() : 0;
+        bValue = b.publishDate ? new Date(b.publishDate).getTime() : 0;
+      } else if (sortBy === 'size') {
+        aValue = Number(a.size) || 0;
+        bValue = Number(b.size) || 0;
+      } else {
+        aValue = Number(a.seeders) || 0;
+        bValue = Number(b.seeders) || 0;
+      }
+
+      const comparison = aValue - bValue;
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+
+    return sorted;
+  }, [results, sortBy, sortDirection]);
 
   return (
     <div className="space-y-4">
@@ -123,18 +150,39 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
 
       {results.length > 0 && (
         <div className="space-y-2">
-          <div className="flex items-center justify-between px-1">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-1">
             <div className="text-xs text-slate-400">
               {results.length} result{results.length === 1 ? '' : 's'}
             </div>
-            <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
-              <SlidersHorizontal className="w-3.5 h-3.5" />
-              Sorted by your search provider
+
+            <div className="flex items-center gap-2 text-xs">
+              <div className="flex items-center gap-1.5">
+                <SlidersHorizontal className="w-3.5 h-3.5 text-slate-500" />
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as 'time' | 'size' | 'seeds')}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 focus:outline-none focus:border-cyan-500"
+                  title="Sort search results"
+                >
+                  <option value="time">Time</option>
+                  <option value="size">Size</option>
+                  <option value="seeds">Seeds</option>
+                </select>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSortDirection(prev => prev === 'desc' ? 'asc' : 'desc')}
+                className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:border-slate-700 transition"
+                title={sortDirection === 'desc' ? 'Descending' : 'Ascending'}
+              >
+                {sortDirection === 'desc' ? '↓' : '↑'}
+              </button>
             </div>
           </div>
 
           <div className="rounded-2xl border border-slate-800 overflow-hidden bg-slate-900 divide-y divide-slate-800/80">
-            {results.map((result, index) => (
+            {sortedResults.map((result, index) => (
               <div
                 key={result.guid || result.infoHash || (result.title + '-' + index)}
                 className="p-4 hover:bg-slate-900/80 transition"
