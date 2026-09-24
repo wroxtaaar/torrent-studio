@@ -224,8 +224,15 @@ async function torrentExists(hash: string): Promise<boolean> {
   }
 }
 
+function isRemoteTorrentSource(value: string): boolean {
+  return /^https?:\/\//i.test(value) && !value.startsWith(internalServerBase + '/api/v2/');
+}
+
 async function addTorrentForMetadata(urls: string, category: string): Promise<string[]> {
   const source = String(urls || '').trim();
+  const resolvedSource = source.startsWith('/api/search/torrents/grab/')
+    ? internalServerBase + source
+    : source;
   const form = new URLSearchParams();
   form.set('savepath', '/downloads');
   form.set('autoTMM', 'false');
@@ -237,8 +244,8 @@ async function addTorrentForMetadata(urls: string, category: string): Promise<st
   // .torrent bytes server-side and upload them to qBittorrent. This keeps API
   // keys out of the browser and avoids relying on qBittorrent's handling of a
   // remote .torrent URL.
-  if (/^https?:\/\//i.test(source)) {
-    const response = await fetch(source, {
+  if (isRemoteTorrentSource(resolvedSource)) {
+    const response = await fetch(resolvedSource, {
       headers: { 'Accept': 'application/x-bittorrent, application/octet-stream, */*' },
     });
 
@@ -533,7 +540,8 @@ export function installQbtProxy(app: Express) {
         if (!source) return res.status(400).json({ error: 'No magnet provided' });
 
         const sourceHash = extractInfoHash(source);
-        if (!sourceHash && !/^https?:\/\//i.test(source)) {
+        const isInternalSearchGrab = source.startsWith('/api/search/torrents/grab/');
+        if (!sourceHash && !/^https?:\/\//i.test(source) && !isInternalSearchGrab) {
           return res.status(400).json({
             error: 'Please provide a valid magnet URI, 40-character torrent hash, or .torrent URL.'
           });
