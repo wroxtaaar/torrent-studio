@@ -161,13 +161,18 @@ async function torrentExists(hash: string): Promise<boolean> {
   }
 }
 
-async function addTorrentPaused(urls: string, category: string): Promise<string[]> {
+async function addTorrentForMetadata(urls: string, category: string): Promise<string[]> {
   const form = new URLSearchParams();
   form.set('urls', urls);
   if (category) form.set('category', category);
   form.set('savepath', '/downloads');
   form.set('autoTMM', 'false');
-  form.set('paused', 'true');
+
+  // Mirror the working Python Telegram bot: let qBittorrent start the
+  // magnet normally, but stop it as soon as metadata is received.
+  // This allows the BitTorrent engine to fetch magnet metadata while
+  // preventing the payload from downloading before file selection.
+  form.set('stopCondition', 'MetadataReceived');
 
   const upstream = await qbtJson('/api/v2/torrents/add', {
     method: 'POST',
@@ -175,7 +180,7 @@ async function addTorrentPaused(urls: string, category: string): Promise<string[
     body: form,
   });
 
-  console.log('[QBT-PROXY] paused add response:', upstream);
+  console.log('[QBT-PROXY] metadata add response:', upstream);
 
   const addedIds = Array.isArray(upstream?.added_torrent_ids)
     ? upstream.added_torrent_ids.map((id: any) => String(id))
@@ -217,7 +222,7 @@ function mapInspectFiles(files: any[]) {
   });
 }
 
-async function waitForTorrentFiles(hash: string, attempts = 20, delayMs = 1000): Promise<any[]> {
+async function waitForTorrentFiles(hash: string, attempts = 60, delayMs = 2000): Promise<any[]> {
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
       const files = await getFiles(hash);
@@ -417,7 +422,7 @@ export function installQbtProxy(app: Express) {
             body: new URLSearchParams({ hashes: hash }),
           });
         } else {
-          const hashes = await addTorrentPaused(source, category);
+          const hashes = await addTorrentForMetadata(source, category);
           hash = hashes[0];
         }
 
@@ -533,7 +538,7 @@ export function installQbtProxy(app: Express) {
             body: new URLSearchParams({ hashes: sourceHash }),
           });
         } else {
-          hashes = await addTorrentPaused(urls, category);
+          hashes = await addTorrentForMetadata(urls, category);
         }
 
         const selectedSet = new Set(selectedFiles.map(Number));
