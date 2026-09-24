@@ -39,8 +39,9 @@ const qbtApiKey = process.env.QBT_API_KEY || process.env.QBITTORRENT_API_KEY || 
 
 const prowlarrBase = (process.env.PROWLARR_URL || 'http://prowlarr:9696').replace(/\/$/, '');
 const prowlarrApiKey = process.env.PROWLARR_API_KEY || '';
-const torrentSearchGrabBase = (process.env.TORRENT_SEARCH_GRAB_BASE_URL || 'http://torrent-studio:3000').replace(/\/$/, '');
+const torrentSearchGrabBase = (process.env.TORRENT_SEARCH_GRAB_BASE_URL || '').replace(/\/$/, '');
 const torrentSearchGrabs = new Map<string, { url: string; expiresAt: number }>();
+const torrentSearchCache = new Map<string, { createdAt: number; results: any[] }>();
 
 function readJson<T>(file: string, fallback: T): T {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')) as T; } catch { return fallback; }
@@ -355,7 +356,8 @@ async function searchTorrentIndexer(query: string, limit = 50, offset = 0) {
 function createTorrentSearchGrab(url: string): string {
   const token = crypto.randomBytes(24).toString('hex');
   torrentSearchGrabs.set(token, { url, expiresAt: Date.now() + 10 * 60 * 1000 });
-  return torrentSearchGrabBase + '/api/search/torrents/grab/' + token;
+  const route = '/api/search/torrents/grab/' + token;
+  return torrentSearchGrabBase ? torrentSearchGrabBase + route : route;
 }
 
 function purgeExpiredTorrentSearchGrabs() {
