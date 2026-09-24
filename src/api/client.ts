@@ -89,7 +89,17 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ urls, category, selectedFiles, manifest })
     });
-    if (!res.ok) throw new Error('Failed to add magnet link');
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      let message = body;
+      try {
+        const parsed = JSON.parse(body);
+        message = parsed.error || parsed.message || body;
+      } catch {
+        // qBittorrent may return plain text.
+      }
+      throw new Error(message || `Failed to add magnet link (${res.status})`);
+    }
   },
 
   async pauseTorrent(hash: string): Promise<void> {
