@@ -678,7 +678,7 @@ async function prepareBrowserVideo(sourcePath: string): Promise<string> {
   }
 }
 
-const hlsJobs = new Map<string, Promise<string>>();
+const hlsJobs = new Map<string, Promise<void>>();
 
 async function runCommand(command: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
   return await new Promise((resolve, reject) => {
@@ -704,12 +704,54 @@ function hlsCacheDirectory(sourcePath: string): string {
   const stat = fs.statSync(sourcePath);
   const key = crypto
     .createHash('sha256')
-    .update('hls-v2')
+    .update('hls-v3')
     .update(sourcePath)
     .update(String(stat.size))
     .update(String(stat.mtimeMs))
     .digest('hex');
   return path.join(HLS_CACHE_DIR, key);
+}
+
+function isHlsReady(cacheDir: string): boolean {
+  return (
+    fs.existsSync(path.join(cacheDir, 'index.m3u8')) &&
+    fs.existsSync(path.join(cacheDir, 'init.mp4')) &&
+    fs.existsSync(path.join(cacheDir, 'segment_00000.m4s'))
+  );
+}
+
+function rewriteHlsPlaylist(playlist: string, fileId: string): string {
+  const hlsAssetUrl = (asset: string) =>
+    `/api/files/hls/${encodeURIComponent(fileId)}/${encodeURIComponent(path.basename(asset))}`;
+
+  return playlist
+    .split(/\r?\n/)
+    .map(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return line;
+
+      if (trimmed.startsWith('#EXT-X-MAP:') && trimmed.includes('URI="')) {
+        return line.replace(
+          /URI="([^"]+)"/,
+          (_match, asset) => `URI="${hlsAssetUrl(String(asset))}"`
+        );
+      }
+
+      if (trimmed.startsWith('#')) return line;
+      return hlsAssetUrl(trimmed);
+    })
+    .join('\n');
+}
+
+async function waitForHlsReady(cacheDir: string, timeoutMs = 25000): Promise<void> {
+  const started = Date.now();
+
+  while (Date.now() - started < timeoutMs) {
+    if (isHlsReady(cacheDir)) return;
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+
+  throw new Error('Timed out waiting for the first HLS segment. The VPS is still preparing the video.');
 }
 
 async function prepareHls(sourcePath: string): Promise<string> {
@@ -724,22 +766,16 @@ async function prepareHls(sourcePath: string): Promise<string> {
         return cacheDir;
       }
     } catch {
-      // Rebuild an incomplete/corrupt cache.
+      // Rebuild incomplete/corrupt cache.
     }
   }
 
   const existing = hlsJobs.get(cacheDir);
-  if (existing) return existing;
-
-  const job = (async () => {
+  if (!existing) {
     fs.mkdirSync(cacheDir, { recursive: true });
 
-    // A previous interrupted encode may have left partial output behind.
-    // Keep only the final playlist/init when they are valid; otherwise rebuild.
-    if (!fs.existsSync(playlist)) {
-      for (const name of fs.readdirSync(cacheDir)) {
-        fs.rmSync(path.join(cacheDir, name), { force: true });
-      }
+    for (const name of fs.readdirSync(cacheDir)) {
+      fs.rmSync(path.join(cacheDir, name), { force: true });
     }
 
     let probe: any;
@@ -752,8 +788,8 @@ async function prepareHls(sourcePath: string): Promise<string> {
         sourcePath
       ]);
       probe = JSON.parse(result.stdout || '{}');
-    } catch (error) {
-      throw new Error('ffprobe could not analyze this media file. Make sure ffmpeg is installed on the VPS.');
+    } catch {
+      throw new Error('ffprobe could not analyze this media file. Make sure ffmpeg is installed.');
     }
 
     const streams = Array.isArray(probe?.streams) ? probe.streams : [];
@@ -787,7 +823,8 @@ async function prepareHls(sourcePath: string): Promise<string> {
         : []),
       '-f', 'hls',
       '-hls_time', '6',
-      '-hls_playlist_type', 'vod',
+      '-hls_playlist_type', 'event',
+      '-hls_list_size', '0',
       '-hls_flags', 'independent_segments+temp_file',
       '-hls_segment_type', 'fmp4',
       '-hls_fmp4_init_filename', 'init.mp4',
@@ -795,24 +832,19 @@ async function prepareHls(sourcePath: string): Promise<string> {
       playlist
     ];
 
-    console.log(`[STREAM] Preparing HLS ${videoCopySafe ? 'stream-copy' : 'H264 transcode'} for ${sourcePath}`);
+    console.log(`[STREAM] Starting HLS ${videoCopySafe ? 'stream-copy' : 'H264 transcode'} for ${sourcePath}`);
 
-    // Produce a complete VOD playlist before returning it to the browser.
-    // The previous event-playlist implementation returned a snapshot too early,
-    // so the browser could see only the first few minutes and never receive the
-    // later playlist entries. VOD + EXT-X-ENDLIST gives hls.js the full duration
-    // and a stable seekable timeline.
-    const child = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...args], {
-      stdio: ['ignore', 'ignore', 'pipe']
-    });
+    const job = new Promise<void>((resolve, reject) => {
+      const child = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...args], {
+        stdio: ['ignore', 'ignore', 'pipe']
+      });
 
-    let stderr = '';
-    child.stderr.on('data', chunk => {
-      stderr += chunk.toString();
-      if (stderr.length > 6000) stderr = stderr.slice(-6000);
-    });
+      let stderr = '';
+      child.stderr.on('data', chunk => {
+        stderr += chunk.toString();
+        if (stderr.length > 6000) stderr = stderr.slice(-6000);
+      });
 
-    await new Promise<void>((resolve, reject) => {
       child.on('error', reject);
       child.on('close', code => {
         if (code !== 0) {
@@ -829,9 +861,10 @@ async function prepareHls(sourcePath: string): Promise<string> {
             !fs.existsSync(path.join(cacheDir, 'segment_00000.m4s')) ||
             !generatedPlaylist.includes('#EXT-X-ENDLIST')
           ) {
-            reject(new Error('ffmpeg finished without producing a complete HLS VOD playlist.'));
+            reject(new Error('ffmpeg finished without producing a complete HLS playlist.'));
             return;
           }
+          console.log(`[STREAM] HLS VOD ready: ${cacheDir}`);
           resolve();
         } catch (error) {
           reject(error);
@@ -839,16 +872,16 @@ async function prepareHls(sourcePath: string): Promise<string> {
       });
     });
 
-    console.log(`[STREAM] HLS VOD ready: ${cacheDir}`);
-    return cacheDir;
-  })();
-
-  hlsJobs.set(cacheDir, job);
-  try {
-    return await job;
-  } finally {
-    hlsJobs.delete(cacheDir);
+    hlsJobs.set(cacheDir, job);
+    void job.finally(() => {
+      hlsJobs.delete(cacheDir);
+    }).catch(error => {
+      console.error('[STREAM] HLS background job failed:', error?.message || error);
+    });
   }
+
+  await waitForHlsReady(cacheDir);
+  return cacheDir;
 }
 
 function sendFile(req: Request, res: Response, fullPath: string, download: boolean) {
@@ -1103,34 +1136,10 @@ async function main() {
     try {
       const cacheDir = await prepareHls(fullPath);
       const playlistPath = path.join(cacheDir, 'index.m3u8');
-      let playlist = fs.readFileSync(playlistPath, 'utf8');
-
-      // Rewrite relative HLS assets to our authenticated/same-origin route.
-      const hlsAssetUrl = (asset: string) =>
-        `/api/files/hls/${encodeURIComponent(f.id)}/${encodeURIComponent(path.basename(asset))}`;
-
-      playlist = playlist
-        .split(/\r?\n/)
-        .map(line => {
-          const trimmed = line.trim();
-          if (!trimmed) return line;
-
-          // fMP4 playlists carry the init segment inside EXT-X-MAP as an
-          // URI attribute rather than as a standalone playlist line.
-          if (trimmed.startsWith('#EXT-X-MAP:') && trimmed.includes('URI="')) {
-            return line.replace(
-              /URI="([^"]+)"/,
-              (_match, asset) => `URI="${hlsAssetUrl(String(asset))}"`
-            );
-          }
-
-          if (trimmed.startsWith('#')) return line;
-          return hlsAssetUrl(trimmed);
-        })
-        .join('\n');
+      const playlist = rewriteHlsPlaylist(fs.readFileSync(playlistPath, 'utf8'), f.id);
 
       res.setHeader('Content-Type','application/vnd.apple.mpegurl');
-      res.setHeader('Cache-Control','no-cache');
+      res.setHeader('Cache-Control','no-store, no-cache, must-revalidate');
       res.setHeader('Access-Control-Allow-Origin','*');
       return res.send(playlist);
     } catch (error: any) {
@@ -1155,16 +1164,26 @@ async function main() {
 
     try {
       const cacheDir = hlsCacheDirectory(fullPath);
+
+      if (asset.endsWith('.m3u8')) {
+        await waitForHlsReady(cacheDir);
+        const playlistPath = path.join(cacheDir, 'index.m3u8');
+        if (!fs.existsSync(playlistPath)) return res.status(404).send('HLS playlist not ready');
+
+        const playlist = rewriteHlsPlaylist(fs.readFileSync(playlistPath, 'utf8'), f.id);
+        res.setHeader('Content-Type','application/vnd.apple.mpegurl');
+        res.setHeader('Cache-Control','no-store, no-cache, must-revalidate');
+        res.setHeader('Access-Control-Allow-Origin','*');
+        return res.send(playlist);
+      }
+
       const assetPath = path.join(cacheDir, asset);
       if (!fs.existsSync(assetPath) || !fs.statSync(assetPath).isFile()) {
         return res.status(404).send('HLS segment not ready');
       }
 
-      if (asset.endsWith('.m3u8')) res.type('application/vnd.apple.mpegurl');
-      else if (asset.endsWith('.mp4')) res.type('video/mp4');
-      else res.type('video/mp4');
-
-      res.setHeader('Cache-Control','no-cache');
+      res.type('video/mp4');
+      res.setHeader('Cache-Control','public, max-age=31536000, immutable');
       res.setHeader('Access-Control-Allow-Origin','*');
       return res.sendFile(assetPath);
     } catch (error: any) {
