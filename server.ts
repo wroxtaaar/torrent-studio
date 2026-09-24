@@ -1148,7 +1148,7 @@ async function main() {
     }
   });
 
-  app.get('/api/files/hls/:id/:asset', (req,res)=>{
+  app.get('/api/files/hls/:id/:asset', async (req,res)=>{
     const f = scanFiles().find(x=>x.id===req.params.id);
     if (!f || f.type !== 'video') return res.status(404).send('Video not found');
 
