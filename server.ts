@@ -39,6 +39,8 @@ const qbtApiKey = process.env.QBT_API_KEY || process.env.QBITTORRENT_API_KEY || 
 
 const prowlarrBase = (process.env.PROWLARR_URL || 'http://prowlarr:9696').replace(/\/$/, '');
 const prowlarrApiKey = process.env.PROWLARR_API_KEY || '';
+const torrentSearchGrabBase = (process.env.TORRENT_SEARCH_GRAB_BASE_URL || 'http://torrent-studio:3000').replace(/\/$/, '');
+const torrentSearchGrabs = new Map<string, { url: string; expiresAt: number }>();
 
 function readJson<T>(file: string, fallback: T): T {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')) as T; } catch { return fallback; }
@@ -327,6 +329,7 @@ async function searchTorrentIndexer(query: string, limit = 50, offset = 0) {
       .map((release: any) => {
         const magnetUrl = String(release.magnetUrl || release.magneturl || '').trim();
         const downloadUrl = String(release.downloadUrl || release.downloadurl || '').trim();
+        const sourceUrl = magnetUrl || (downloadUrl ? createTorrentSearchGrab(downloadUrl) : '');
         return {
           guid: release.guid,
           title: String(release.title || release.sortTitle || 'Untitled'),
@@ -338,13 +341,27 @@ async function searchTorrentIndexer(query: string, limit = 50, offset = 0) {
           publishDate: release.publishDate || undefined,
           infoHash: String(release.infoHash || ''),
           magnetUrl: magnetUrl || undefined,
-          downloadUrl: downloadUrl || undefined,
+          // Never expose Prowlarr's API key-bearing downloadUrl to the browser.
+          downloadUrl: undefined,
           infoUrl: String(release.infoUrl || '').trim() || undefined,
-          sourceUrl: magnetUrl || downloadUrl || undefined,
+          sourceUrl: sourceUrl || undefined,
         };
       });
   } finally {
     clearTimeout(timer);
+  }
+}
+
+function createTorrentSearchGrab(url: string): string {
+  const token = crypto.randomBytes(24).toString('hex');
+  torrentSearchGrabs.set(token, { url, expiresAt: Date.now() + 10 * 60 * 1000 });
+  return torrentSearchGrabBase + '/api/search/torrents/grab/' + token;
+}
+
+function purgeExpiredTorrentSearchGrabs() {
+  const now = Date.now();
+  for (const [token, value] of torrentSearchGrabs) {
+    if (value.expiresAt <= now) torrentSearchGrabs.delete(token);
   }
 }
 
@@ -704,6 +721,43 @@ async function main() {
   app.use((_req,res,next)=>{ res.setHeader('X-Powered-By','Torrent-Studio'); next(); });
 
   installQbtProxy(app);
+
+  app.get('/api/search/torrents/grab/:token', async (req,res)=>{
+    purgeExpiredTorrentSearchGrabs();
+
+    const token = String(req.params.token || '');
+    const grab = torrentSearchGrabs.get(token);
+    if (!grab || grab.expiresAt <= Date.now()) {
+      torrentSearchGrabs.delete(token);
+      return res.status(404).send('Search result download link expired');
+    }
+
+    try {
+      const upstream = await fetch(grab.url, {
+        headers: {
+          'Accept': 'application/x-bittorrent, application/octet-stream, */*',
+          'X-Api-Key': prowlarrApiKey,
+        },
+      });
+
+      if (!upstream.ok) {
+        const body = await upstream.text();
+        return res.status(upstream.status).send(body || 'Unable to retrieve torrent from Prowlarr');
+      }
+
+      const data = Buffer.from(await upstream.arrayBuffer());
+      if (!data.length) return res.status(502).send('Prowlarr returned an empty torrent file');
+
+      res.setHeader('Content-Type', upstream.headers.get('content-type') || 'application/x-bittorrent');
+      const disposition = upstream.headers.get('content-disposition');
+      if (disposition) res.setHeader('Content-Disposition', disposition);
+      res.setHeader('Content-Length', String(data.length));
+      return res.send(data);
+    } catch (error: any) {
+      console.error('[SEARCH-GRAB]', error?.message || error);
+      return res.status(502).send(error?.message || 'Unable to retrieve torrent');
+    }
+  });
 
   app.get('/api/search/torrents', async (req,res)=>{
     try {
