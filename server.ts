@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import archiver from 'archiver';
+import * as archiver from 'archiver';
 import { installQbtProxy } from './src/qbtProxy.ts';
 import type {
   StorageFile, StorageFolder, UserProfile, StorageStats,
