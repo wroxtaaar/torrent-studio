@@ -88,12 +88,12 @@ export const TorrentCard: React.FC<TorrentCardProps> = ({
         if (target.closest('button, a, input, select, textarea')) return;
         onSelectFiles(torrent);
       }}
-      className="p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-slate-700/80 transition shadow-lg flex flex-col gap-3 group cursor-pointer"
+      className="p-3 sm:p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-slate-700/80 transition shadow-lg flex flex-col gap-3 group cursor-pointer"
       title="Open files"
     >
       {/* Top row: Title and Status */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="overflow-hidden flex-1">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2.5">
+        <div className="overflow-hidden flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span
               className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${statusClass}`}
@@ -105,7 +105,7 @@ export const TorrentCard: React.FC<TorrentCardProps> = ({
             </span>
           </div>
           <h3
-            className="text-sm font-semibold text-slate-100 mt-1 truncate group-hover:text-cyan-400 transition"
+            className="text-sm font-semibold text-slate-100 mt-1 line-clamp-2 sm:truncate break-words group-hover:text-cyan-400 transition"
             title={torrent.name}
           >
             {torrent.name}
@@ -113,7 +113,7 @@ export const TorrentCard: React.FC<TorrentCardProps> = ({
         </div>
 
         {/* Action buttons */}
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center justify-end gap-1 shrink-0 flex-wrap sm:flex-nowrap">
           {/* Selective Files inspector */}
           <button
             onClick={() => onSelectFiles(torrent)}
@@ -198,8 +198,8 @@ export const TorrentCard: React.FC<TorrentCardProps> = ({
       </div>
 
       {/* Telemetry row */}
-      <div className="flex items-center justify-between flex-wrap gap-2 text-xs font-mono text-slate-400">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between flex-wrap gap-2 text-xs font-mono text-slate-400">
+        <div className="flex items-center gap-2.5 min-w-0">
           <span className="text-slate-200 font-semibold">{progressPercent}%</span>
           <span>
             {formatBytes(downloadTargetSize * torrent.progress)} / {formatBytes(downloadTargetSize)}
@@ -211,7 +211,7 @@ export const TorrentCard: React.FC<TorrentCardProps> = ({
           </span>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5 sm:justify-end flex-wrap">
           {isDownloading && (
             <>
               <span className="text-cyan-400 flex items-center gap-1">
