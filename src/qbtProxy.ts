@@ -22,6 +22,27 @@ const internalServerBase = (process.env.TORRENT_SEARCH_GRAB_INTERNAL_BASE_URL ||
 let qbtSessionCookie = '';
 let qbtLoginPromise: Promise<void> | null = null;
 
+// The inspect step may create the torrent before the browser submits the
+// selected files. Remember that exact source -> qBittorrent hash mapping so
+// the final step can always reuse the paused preview torrent instead of
+// attempting a second add (which qBittorrent correctly reports as Conflict).
+const previewTorrentHashes = new Map<string, { hash: string; expiresAt: number }>();
+
+function rememberPreviewTorrent(source: string, hash: string) {
+  previewTorrentHashes.set(source, { hash, expiresAt: Date.now() + 30 * 60 * 1000 });
+}
+
+function getPreviewTorrent(source: string): string {
+  const entry = previewTorrentHashes.get(source);
+  if (!entry) return '';
+  if (entry.expiresAt <= Date.now()) {
+    previewTorrentHashes.delete(source);
+    return '';
+  }
+  return entry.hash;
+}
+
+
 function requireConfig() {
   if (!config.baseUrl) throw new Error('QBT_URL is not configured');
   if (!config.apiKey && (!config.username || !config.password)) {
@@ -597,6 +618,8 @@ export function installQbtProxy(app: Express) {
           hash = hashes[0];
         }
 
+        if (hash) rememberPreviewTorrent(source, hash);
+
         const files = await waitForTorrentFiles(hash, 10, 1000);
         if (!files.length) {
           return res.status(202).json({
@@ -700,9 +723,10 @@ export function installQbtProxy(app: Express) {
         const category = String(body.category || 'Downloads');
         const sourceHash = extractInfoHash(urls);
         const existingHash = String(body.existingHash || '').trim().toLowerCase();
+        const rememberedHash = getPreviewTorrent(urls);
         let hashes: string[] = [];
 
-        const reuseHash = existingHash || sourceHash;
+        const reuseHash = existingHash || rememberedHash || sourceHash;
         if (reuseHash && await torrentExists(reuseHash)) {
           hashes = [reuseHash];
           await qbtJson('/api/v2/torrents/stop', {
@@ -771,6 +795,12 @@ export function installQbtProxy(app: Express) {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams({ hashes: hash }),
           });
+        }
+
+        for (const hash of hashes) {
+          for (const [source, entry] of previewTorrentHashes) {
+            if (entry.hash === hash) previewTorrentHashes.delete(source);
+          }
         }
 
         return res.json({ ok: true, hashes });
