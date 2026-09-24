@@ -239,15 +239,51 @@ export default function App() {
   };
 
   const handlePauseTorrent = async (hash: string) => {
-    await api.pauseTorrent(hash);
-    const updated = await api.getTorrents();
-    setTorrents(updated);
+    // Optimistic state change: flip the UI immediately, then reconcile with qBittorrent.
+    const previous = torrents;
+    setTorrents(prev =>
+      prev.map(t =>
+        t.hash === hash
+          ? { ...t, state: 'pausedDL', dlspeed: 0, eta: -1 }
+          : t
+      )
+    );
+
+    try {
+      await api.pauseTorrent(hash);
+    } catch (error) {
+      console.error('Failed to pause torrent:', error);
+      setTorrents(previous);
+      throw error;
+    }
+
+    // Reconcile once the API call completes; the icon/state already changed instantly.
+    api.getTorrents()
+      .then(setTorrents)
+      .catch(error => console.error('Failed to refresh torrents after pause:', error));
   };
 
   const handleResumeTorrent = async (hash: string) => {
-    await api.resumeTorrent(hash);
-    const updated = await api.getTorrents();
-    setTorrents(updated);
+    const previous = torrents;
+    setTorrents(prev =>
+      prev.map(t =>
+        t.hash === hash
+          ? { ...t, state: 'downloading', eta: t.eta < 0 ? 0 : t.eta }
+          : t
+      )
+    );
+
+    try {
+      await api.resumeTorrent(hash);
+    } catch (error) {
+      console.error('Failed to resume torrent:', error);
+      setTorrents(previous);
+      throw error;
+    }
+
+    api.getTorrents()
+      .then(setTorrents)
+      .catch(error => console.error('Failed to refresh torrents after resume:', error));
   };
 
   const handleDeleteTorrent = (hash: string) => {
@@ -262,9 +298,47 @@ export default function App() {
   };
 
   const handleUpdateFilePriority = async (hash: string, fileId: string, priority: number) => {
-    await api.setFilePriority(hash, fileId, priority);
-    const updated = await api.getTorrents();
-    setTorrents(updated);
+    const ids = fileId.split('|').map(Number).filter(Number.isFinite);
+    const previous = torrents;
+
+    // Reflect checkbox/priority changes immediately in the main torrent card.
+    setTorrents(prev =>
+      prev.map(t => {
+        if (t.hash !== hash) return t;
+
+        const nextFiles = (t.files || []).map(file =>
+          ids.includes(file.index)
+            ? {
+                ...file,
+                priority,
+                progress: priority === 0 ? 0 : file.progress
+              }
+            : file
+        );
+
+        const selectedSize = nextFiles
+          .filter(file => file.priority > 0)
+          .reduce((sum, file) => sum + file.size, 0);
+
+        return {
+          ...t,
+          files: nextFiles,
+          selected_size: selectedSize
+        };
+      })
+    );
+
+    try {
+      await api.setFilePriority(hash, fileId, priority);
+    } catch (error) {
+      console.error('Failed to update file priority:', error);
+      setTorrents(previous);
+      throw error;
+    }
+
+    api.getTorrents()
+      .then(setTorrents)
+      .catch(error => console.error('Failed to refresh torrents after priority update:', error));
   };
 
   const handleDeleteFile = (id: string) => {
