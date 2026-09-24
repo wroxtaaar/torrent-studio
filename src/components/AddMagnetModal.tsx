@@ -506,6 +506,8 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
                   ? `Download ${selectedCount} Selected File(s)`
                   : isInspecting
                   ? 'Loading File List...'
+                  : !magnetInput.trim()
+                  ? 'Paste Magnet First'
                   : inspectedFiles.length === 0
                   ? 'Load File List'
                   : 'Select Files to Continue'}
