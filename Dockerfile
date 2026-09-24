@@ -16,7 +16,10 @@ ENV NODE_ENV=production
 ENV PORT=3000
 
 COPY --from=build /app/package*.json ./
-RUN npm ci
+# tsx is a devDependency but is the runtime for server.ts in this image.
+# Install dev dependencies in the runtime image so startup does not invoke
+# npx to download tsx on every container restart.
+RUN npm ci --include=dev
 
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/server.ts ./server.ts
@@ -25,4 +28,4 @@ COPY --from=build /app/src ./src
 RUN mkdir -p /app/storage/downloads /app/storage/temp
 
 EXPOSE 3000
-CMD ["npx", "tsx", "server.ts"]
+CMD ["./node_modules/.bin/tsx", "server.ts"]
