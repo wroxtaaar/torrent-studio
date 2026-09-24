@@ -262,7 +262,37 @@ async function addTorrentForMetadata(urls: string, category: string): Promise<st
     }
 
     if (!data.length) {
-      throw new Error('The search result returned an empty torrent file.');
+      throw new Error('The search result returned an empty torrent response.');
+    }
+
+    // Prowlarr may resolve a search result to a magnet URI rather than a
+    // .torrent descriptor. In that case hand the magnet to qBittorrent using
+    // the same metadata-only flow as a normal magnet search.
+    const textResponse = data.toString('utf8').trim();
+    if (/^magnet:\?/i.test(textResponse)) {
+      const magnetForm = new URLSearchParams(form);
+      magnetForm.set('urls', textResponse);
+      const magnetResult = await qbtJson('/api/v2/torrents/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: magnetForm,
+      });
+
+      console.log('[QBT-PROXY] search result resolved to magnet:', magnetResult);
+
+      const addedIds = Array.isArray(magnetResult?.added_torrent_ids)
+        ? magnetResult.added_torrent_ids.map((id: any) => String(id))
+        : [];
+      const magnetHash = extractInfoHash(textResponse);
+
+      if (!addedIds.length && !magnetHash) {
+        throw Object.assign(
+          new Error('qBittorrent accepted the search magnet but did not return its hash.'),
+          { status: 502 }
+        );
+      }
+
+      return addedIds.length ? addedIds : [magnetHash];
     }
 
     if (data.length > 50 * 1024 * 1024) {
@@ -273,7 +303,7 @@ async function addTorrentForMetadata(urls: string, category: string): Promise<st
     try {
       decoded = bencode.decode(data);
     } catch {
-      throw new Error('The search result did not return a valid .torrent file.');
+      throw new Error('The search result did not return a valid .torrent file or magnet URI.');
     }
 
     if (!decoded?.info) {
