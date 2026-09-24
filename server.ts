@@ -292,6 +292,7 @@ function streamCachePath(sourcePath: string) {
   const stat = fs.statSync(sourcePath);
   const key = crypto
     .createHash('sha256')
+    .update('browser-h264-v2')
     .update(sourcePath)
     .update(String(stat.size))
     .update(String(stat.mtimeMs))
@@ -330,36 +331,25 @@ async function prepareBrowserVideo(sourcePath: string): Promise<string> {
     const temp = cached + '.tmp';
     fs.rmSync(temp, { force: true });
 
-    // First try a fast remux: this preserves quality and is usually very fast
-    // for H.264/AAC MKV files. The resulting MP4 is seekable and has real duration.
-    try {
-      await runFfmpeg([
-        '-i', sourcePath,
-        '-map', '0:v:0',
-        '-map', '0:a:0?',
-        '-c', 'copy',
-        '-movflags', '+faststart',
-        '-f', 'mp4',
-        temp
-      ]);
-    } catch (remuxError) {
-      console.warn('[STREAM] Fast remux failed, transcoding:', remuxError);
-      fs.rmSync(temp, { force: true });
-
-      await runFfmpeg([
-        '-i', sourcePath,
-        '-map', '0:v:0',
-        '-map', '0:a:0?',
-        '-c:v', 'libx264',
-        '-preset', 'veryfast',
-        '-crf', '23',
-        '-c:a', 'aac',
-        '-b:a', '160k',
-        '-movflags', '+faststart',
-        '-f', 'mp4',
-        temp
-      ]);
-    }
+    // Always produce a browser-safe H.264/AVC + AAC MP4. This avoids relying
+    // on the source MKV codec/profile being supported by Chromium/Edge.
+    await runFfmpeg([
+      '-i', sourcePath,
+      '-map', '0:v:0',
+      '-map', '0:a:0?',
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-crf', '23',
+      '-pix_fmt', 'yuv420p',
+      '-profile:v', 'high',
+      '-level:v', '4.1',
+      '-c:a', 'aac',
+      '-b:a', '160k',
+      '-ar', '48000',
+      '-movflags', '+faststart',
+      '-f', 'mp4',
+      temp
+    ]);
 
     if (!fs.existsSync(temp) || fs.statSync(temp).size === 0) {
       throw new Error('ffmpeg produced an empty streaming file');
