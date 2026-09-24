@@ -384,8 +384,18 @@ export function installQbtProxy(app: Express) {
         const urls = String(body?.urls || '').trim();
         if (!urls) return res.status(400).send('No magnet link or URL provided');
 
-        const selectedFiles = Array.isArray(body.selectedFiles) ? body.selectedFiles.map(Number) : undefined;
-        const manifest = Array.isArray(body.manifest) ? body.manifest : undefined;
+        const selectedFiles = Array.isArray(body.selectedFiles) ? body.selectedFiles.map(Number) : [];
+        const manifest = Array.isArray(body.manifest) ? body.manifest : [];
+
+        // Selection is mandatory. Never allow a torrent to start with the
+        // default qBittorrent priorities, otherwise every file can begin
+        // downloading before the UI selection is applied.
+        if (!manifest.length || !selectedFiles.length) {
+          return res.status(400).json({
+            error: 'File selection is required. Select at least one file before starting the torrent.'
+          });
+        }
+
         const category = String(body.category || 'Downloads');
 
         const form = new URLSearchParams();
@@ -393,16 +403,7 @@ export function installQbtProxy(app: Express) {
         if (category) form.set('category', category);
         form.set('savepath', '/downloads');
         form.set('autoTMM', 'false');
-
-        // qBittorrent 5.2.x supports filePriorities at add time. This avoids
-        // starting the wrong files while metadata is being resolved.
-        if (selectedFiles && manifest?.length) {
-          const selectedSet = new Set(selectedFiles);
-          const priorities = manifest.map((_item: any, index: number) =>
-            selectedSet.has(index) ? '1' : '0'
-          );
-          form.set('filePriorities', priorities.join(','));
-        }
+        form.set('paused', 'true');
 
         const upstream = await qbtJson('/api/v2/torrents/add', {
           method: 'POST',
@@ -411,7 +412,81 @@ export function installQbtProxy(app: Express) {
         });
 
         console.log('[QBT-PROXY] add response:', upstream);
-        return res.send(typeof upstream === 'string' ? upstream : 'Ok.');
+
+        const addedIds = Array.isArray(upstream?.added_torrent_ids)
+          ? upstream.added_torrent_ids.map((id: any) => String(id))
+          : [];
+        const magnetHash = (urls.match(/urn:btih:([a-zA-Z0-9]+)/i)?.[1] || '').toLowerCase();
+        const hashes = addedIds.length ? addedIds : (magnetHash ? [magnetHash] : []);
+
+        if (!hashes.length) {
+          return res.status(502).json({
+            error: 'qBittorrent added the torrent but did not return its hash, so file selection could not be applied safely.'
+          });
+        }
+
+        const selectedSet = new Set(selectedFiles.map(Number));
+        const priorities = manifest.map((_item: any, index: number) =>
+          selectedSet.has(index) ? 1 : 0
+        );
+
+        for (const hash of hashes) {
+          // Wait until magnet metadata/files are available while the torrent
+          // remains paused. This guarantees unchecked files never start.
+          let files: any[] = [];
+          for (let attempt = 0; attempt < 30; attempt++) {
+            try {
+              files = await getFiles(hash);
+              if (files.length >= manifest.length) break;
+            } catch {
+              // metadata is still resolving
+            }
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+
+          if (files.length === 0) {
+            return res.status(202).json({
+              ok: true,
+              hash,
+              selectionPending: true,
+              message: 'Torrent added paused; waiting for metadata before applying file selection.'
+            });
+          }
+
+          const idsToSkip = priorities
+            .map((priority: number, index: number) => priority === 0 ? String(index) : '')
+            .filter(Boolean)
+            .join('|');
+
+          const idsToDownload = priorities
+            .map((priority: number, index: number) => priority > 0 ? String(index) : '')
+            .filter(Boolean)
+            .join('|');
+
+          if (idsToSkip) {
+            await qbtJson('/api/v2/torrents/filePrio', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: new URLSearchParams({ hash, id: idsToSkip, priority: '0' }),
+            });
+          }
+
+          if (idsToDownload) {
+            await qbtJson('/api/v2/torrents/filePrio', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: new URLSearchParams({ hash, id: idsToDownload, priority: '1' }),
+            });
+          }
+
+          await qbtJson('/api/v2/torrents/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ hashes: hash }),
+          });
+        }
+
+        return res.json({ ok: true, hashes });
       }
 
       if (route === '/torrents/filePrio' && method === 'POST') {
