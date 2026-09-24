@@ -193,7 +193,17 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       return;
     }
 
-    if (inspectedFiles.length > 0 && selectedCount === 0) {
+    if (isInspecting) {
+      setError('Please wait while the torrent file list is being loaded.');
+      return;
+    }
+
+    if (inspectedFiles.length === 0) {
+      setError('Please wait for the torrent file list to load before starting the download.');
+      return;
+    }
+
+    if (selectedCount === 0) {
       setError('Please select at least 1 file to download from this torrent.');
       return;
     }
@@ -450,7 +460,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
             ) : inspectedFiles.length > 0 ? (
               <span className="text-rose-400">No files selected</span>
             ) : (
-              <span>Paste a magnet link or upload a .torrent to inspect files</span>
+              <span>Paste a magnet link or upload a .torrent to load the file list first</span>
             )}
           </div>
 
@@ -465,7 +475,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
             <button
               type="button"
               onClick={handleSubmit}
-              disabled={isLoading || !magnetInput.trim() || (inspectedFiles.length > 0 && selectedCount === 0)}
+              disabled={isLoading || isInspecting || !magnetInput.trim() || inspectedFiles.length === 0 || selectedCount === 0}
               className="px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 text-xs font-bold transition flex items-center gap-2 shadow-lg shadow-cyan-500/20"
             >
               <FolderDown className="w-4 h-4" />
@@ -474,7 +484,11 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
                   ? 'Adding Task...'
                   : selectedCount > 0
                   ? `Download ${selectedCount} Selected File(s)`
-                  : 'Add Magnet'}
+                  : isInspecting
+                  ? 'Loading File List...'
+                  : inspectedFiles.length === 0
+                  ? 'Waiting for File List...'
+                  : 'Select Files to Continue'}
               </span>
             </button>
           </div>
