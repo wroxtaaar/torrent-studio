@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { StorageFile } from '../types/index.ts';
 import { formatBytes, formatDuration } from '../utils/formatters.ts';
+import Hls from 'hls.js';
 
 interface MediaPlayerModalProps {
   file: StorageFile | null;
@@ -47,6 +48,7 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
 
   const isVideo = file?.type === 'video';
   const mediaRef = isVideo ? videoRef : audioRef;
@@ -57,6 +59,77 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
     setIsPlaying(true);
     setMediaError('');
   }, [file?.id]);
+
+  useEffect(() => {
+    const media = mediaRef.current;
+    if (!media || !file) return;
+
+    setMediaError('');
+
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+
+    if (!isVideo) {
+      media.src = file.streamUrl;
+      media.load();
+      return () => {
+        media.pause();
+        media.removeAttribute('src');
+        media.load();
+      };
+    }
+
+    // HLS.js handles HLS + MSE on Chromium/Firefox. Native HLS remains the
+    // fallback for browsers such as Safari.
+    if (Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+        backBufferLength: 90,
+        maxBufferLength: 60
+      });
+
+      hlsRef.current = hls;
+
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) {
+          console.error('[HLS] fatal playback error:', data);
+          setMediaError(
+            data.details
+              ? `HLS playback error: ${data.details}`
+              : 'Unable to load the HLS video stream.'
+          );
+          setIsPlaying(false);
+        }
+      });
+
+      hls.loadSource(file.streamUrl);
+      hls.attachMedia(media);
+
+      return () => {
+        hls.destroy();
+        if (hlsRef.current === hls) hlsRef.current = null;
+        media.pause();
+        media.removeAttribute('src');
+        media.load();
+      };
+    }
+
+    if (media.canPlayType('application/vnd.apple.mpegurl')) {
+      media.src = file.streamUrl;
+      media.load();
+
+      return () => {
+        media.pause();
+        media.removeAttribute('src');
+        media.load();
+      };
+    }
+
+    setMediaError('This browser does not support HLS playback.');
+  }, [file?.id, file?.streamUrl, isVideo, isMinimized]);
 
   if (!file) return null;
 
@@ -279,7 +352,7 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
               <p className="text-xs text-slate-400 flex items-center gap-2">
                 <span>{formatBytes(file.size)}</span>
                 <span>•</span>
-                <span className="text-emerald-400 font-medium">Direct HTTP Range Streaming</span>
+                <span className="text-emerald-400 font-medium">Adaptive HLS Streaming</span>
               </p>
             </div>
           </div>
@@ -329,7 +402,7 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
               <div className="max-w-md rounded-xl bg-slate-900/95 border border-rose-500/30 p-5">
                 <p className="text-sm font-semibold text-rose-300">{mediaError}</p>
                 <p className="text-xs text-slate-400 mt-2">
-                  The VPS prepares MKV files as browser-compatible MP4 for playback.
+                  The VPS analyzes the media and prepares a browser-compatible HLS stream.
                 </p>
               </div>
             </div>
@@ -337,7 +410,6 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
           {isVideo ? (
             <video
               ref={videoRef}
-              src={file.streamUrl}
               className="w-full h-full max-h-[60vh] object-contain cursor-pointer"
               onClick={togglePlay}
               onTimeUpdate={onTimeUpdate}
