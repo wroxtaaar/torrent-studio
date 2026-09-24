@@ -342,22 +342,29 @@ export function installQbtProxy(app: Express) {
             })
           : [{ index: 0, name, size: Number(decoded.info.length || 0), path: name, type: 'other' }];
 
-        const upload = new FormData();
-        upload.append('torrents', new Blob([buffer], { type: 'application/x-bittorrent' }), filename);
-        upload.append('savepath', '/downloads');
-        const response = await qbtFetch('/api/v2/torrents/add', { method: 'POST', body: upload });
-        const bodyText = await response.text();
-        if (!response.ok) throw Object.assign(new Error(bodyText || response.statusText), { status: response.status });
-        if (bodyText.trim() && bodyText.trim() !== 'Ok.') return res.status(502).json({ error: bodyText });
+        const trackerValues: string[] = [];
+        const addTracker = (value: any) => {
+          if (Buffer.isBuffer(value)) trackerValues.push(value.toString('utf8'));
+          else if (typeof value === 'string') trackerValues.push(value);
+        };
+        addTracker(decoded.announce);
+        if (Array.isArray(decoded['announce-list'])) {
+          for (const tier of decoded['announce-list']) {
+            if (Array.isArray(tier)) tier.forEach(addTracker);
+            else addTracker(tier);
+          }
+        }
+        const uniqueTrackers = [...new Set(trackerValues.filter(Boolean))];
+        const magnetUri = `magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(name)}${uniqueTrackers.map(t=>`&tr=${encodeURIComponent(t)}`).join('')}`;
 
         return res.json({
           name,
           hash,
           files,
           totalSize: files.reduce((sum: number, f: any) => sum + f.size, 0),
-          magnetUri: `magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(name)}`,
-          accepted: true,
-          source: 'qBittorrent'
+          magnetUri,
+          accepted: false,
+          source: 'torrent_file'
         });
       }
 
