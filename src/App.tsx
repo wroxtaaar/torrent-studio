@@ -127,6 +127,11 @@ export default function App() {
   // Previous torrent hashes for completion tracking
   const prevTorrentStates = useRef<Record<string, string>>({});
 
+  // qBittorrent applies stop/start asynchronously. Keep an optimistic transfer
+  // state visible for a short reconciliation window so the 1.8s polling loop
+  // cannot immediately overwrite a user's pause/resume click with stale state.
+  const pendingTransferStates = useRef<Record<string, { state: 'pausedDL' | 'downloading'; expiresAt: number }>>({});
+
   // Theme synchronization
   useEffect(() => {
     try {
@@ -209,7 +214,28 @@ export default function App() {
           prevTorrentStates.current[t.hash] = t.state;
         });
 
-        setTorrents(torrentList);
+        const now = Date.now();
+        const reconciledTorrentList = torrentList.map(t => {
+          const pending = pendingTransferStates.current[t.hash];
+          if (!pending) return t;
+
+          if (pending.expiresAt <= now) {
+            delete pendingTransferStates.current[t.hash];
+            return t;
+          }
+
+          if (pending.state === 'pausedDL') {
+            return { ...t, state: 'pausedDL', dlspeed: 0, eta: -1 };
+          }
+
+          return {
+            ...t,
+            state: 'downloading',
+            eta: t.eta < 0 ? 0 : t.eta
+          };
+        });
+
+        setTorrents(reconciledTorrentList);
       } catch (e) {
         console.error('Polling error:', e);
       }
@@ -239,8 +265,14 @@ export default function App() {
   };
 
   const handlePauseTorrent = async (hash: string) => {
-    // Optimistic state change: flip the UI immediately, then reconcile with qBittorrent.
+    // Update immediately and hold that state through the next few polling
+    // cycles while qBittorrent finishes applying stop().
     const previous = torrents;
+    pendingTransferStates.current[hash] = {
+      state: 'pausedDL',
+      expiresAt: Date.now() + 5000
+    };
+
     setTorrents(prev =>
       prev.map(t =>
         t.hash === hash
@@ -252,19 +284,20 @@ export default function App() {
     try {
       await api.pauseTorrent(hash);
     } catch (error) {
+      delete pendingTransferStates.current[hash];
       console.error('Failed to pause torrent:', error);
       setTorrents(previous);
       throw error;
     }
-
-    // Reconcile once the API call completes; the icon/state already changed instantly.
-    api.getTorrents()
-      .then(setTorrents)
-      .catch(error => console.error('Failed to refresh torrents after pause:', error));
   };
 
   const handleResumeTorrent = async (hash: string) => {
     const previous = torrents;
+    pendingTransferStates.current[hash] = {
+      state: 'downloading',
+      expiresAt: Date.now() + 5000
+    };
+
     setTorrents(prev =>
       prev.map(t =>
         t.hash === hash
@@ -276,14 +309,11 @@ export default function App() {
     try {
       await api.resumeTorrent(hash);
     } catch (error) {
+      delete pendingTransferStates.current[hash];
       console.error('Failed to resume torrent:', error);
       setTorrents(previous);
       throw error;
     }
-
-    api.getTorrents()
-      .then(setTorrents)
-      .catch(error => console.error('Failed to refresh torrents after resume:', error));
   };
 
   const handleDeleteTorrent = (hash: string) => {
