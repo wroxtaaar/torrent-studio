@@ -195,15 +195,74 @@ function scanFolders(): StorageFolder[] {
   });
 }
 
-async function qbtFetch(pathname: string, init: RequestInit = {}) {
+let qbtSessionCookie = '';
+let qbtLoginPromise: Promise<void> | null = null;
+
+async function qbtLogin(): Promise<void> {
+  if (qbtApiKey) return;
+  if (qbtSessionCookie) return;
+  if (qbtLoginPromise) return qbtLoginPromise;
+
+  if (!qbtUser || !qbtPassword) {
+    throw new Error('Set QBT_USERNAME and QBT_PASSWORD');
+  }
+
+  qbtLoginPromise = (async () => {
+    const form = new URLSearchParams({ username: qbtUser, password: qbtPassword });
+    const response = await fetch(qbtBase + '/api/v2/auth/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Referer': qbtBase + '/',
+        'Origin': qbtBase,
+      },
+      body: form,
+    });
+
+    const text = await response.text();
+    if (!response.ok || !/^Ok\.?$/i.test(text.trim())) {
+      throw Object.assign(new Error(text || response.statusText || 'qBittorrent login failed'), { status: response.status });
+    }
+
+    const setCookie = response.headers.get('set-cookie') || '';
+    const match = setCookie.match(/(QBT_SID_[^=]+=[^;]+)/);
+    if (!match) throw new Error('qBittorrent login succeeded but no session cookie was returned');
+
+    qbtSessionCookie = match[1];
+    console.log('[QBT] WebAPI session login successful');
+  })();
+
+  try {
+    await qbtLoginPromise;
+  } finally {
+    qbtLoginPromise = null;
+  }
+}
+
+async function qbtFetchOnce(pathname: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
   if (qbtApiKey) headers.set('Authorization', 'Bearer ' + qbtApiKey);
-  else if (qbtUser && qbtPassword) headers.set('Authorization', 'Basic ' + Buffer.from(qbtUser + ':' + qbtPassword).toString('base64'));
+  else headers.set('Cookie', qbtSessionCookie);
   headers.set('Referer', qbtBase + '/');
+  headers.set('Origin', qbtBase);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
   try { return await fetch(qbtBase + pathname, { ...init, headers, signal: controller.signal }); }
   finally { clearTimeout(timer); }
+}
+
+async function qbtFetch(pathname: string, init: RequestInit = {}) {
+  if (!qbtApiKey) await qbtLogin();
+
+  let response = await qbtFetchOnce(pathname, init);
+
+  if (response.status === 403 && !qbtApiKey) {
+    qbtSessionCookie = '';
+    await qbtLogin();
+    response = await qbtFetchOnce(pathname, init);
+  }
+
+  return response;
 }
 async function qbtJson(pathname: string, init: RequestInit = {}) {
   const r = await qbtFetch(pathname, init);
