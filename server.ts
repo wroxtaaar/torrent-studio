@@ -26,9 +26,8 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// The dev server inside AI Studio container MUST listen strictly on port 3000
-// (Nginx listens on port 8080 and proxies to localhost:3000)
-const PORT = Number(process.env.PORT) || 10000;
+// Oracle VPS deployment: the Node server is the public web app.
+const PORT = Number(process.env.PORT) || 3000;
 const STORAGE_DIR = path.resolve(__dirname, 'storage');
 const DOWNLOADS_DIR = path.resolve(STORAGE_DIR, 'downloads');
 const TEMP_DIR = path.resolve(STORAGE_DIR, 'temp');
@@ -155,8 +154,8 @@ const cleanupSettings: CleanupSettings = {
 
 // qBittorrent Configuration
 const qbtSettings: QbtSettings = {
-  isExternal: true,
-  host: process.env.QBT_URL || process.env.QBITTORRENT_URL || 'http://localhost:8080',
+  isExternal: false,
+  host: process.env.QBT_URL || process.env.QBITTORRENT_URL || 'http://qbittorrent:8080',
   username: process.env.QBT_USERNAME || process.env.QBITTORRENT_USERNAME || '',
   connected: Boolean(
     process.env.QBT_API_KEY ||
@@ -164,7 +163,7 @@ const qbtSettings: QbtSettings = {
     (process.env.QBT_USERNAME && process.env.QBT_PASSWORD) ||
     (process.env.QBITTORRENT_USERNAME && process.env.QBITTORRENT_PASSWORD)
   ),
-  version: 'External qBittorrent'
+  version: 'Local qBittorrent'
 };
 
 // Torrents state
@@ -1697,7 +1696,7 @@ async function startServer() {
   // 7. Vite Integration in Development / Static in Production
   // --------------------------------------------------------------------------
 
-  const isProduction = process.env.NODE_ENV === 'production';
+  const isProduction = process.env.NODE_ENV !== 'development';
 
   if (!isProduction) {
     const { createServer: createViteServer } = await import('vite');
