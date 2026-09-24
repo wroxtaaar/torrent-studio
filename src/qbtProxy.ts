@@ -430,13 +430,14 @@ export function installQbtProxy(app: Express) {
         if (!hashes) return res.status(400).send('hashes is required');
 
         if (route === '/torrents/pause') {
-          await qbtJson('/api/v2/torrents/pause', {
+          // qBittorrent 5.x renamed pause/resume to stop/start.
+          await qbtJson('/api/v2/torrents/stop', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams({ hashes }),
           });
         } else if (route === '/torrents/resume') {
-          await qbtJson('/api/v2/torrents/resume', {
+          await qbtJson('/api/v2/torrents/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams({ hashes }),
