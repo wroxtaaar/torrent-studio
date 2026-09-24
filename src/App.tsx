@@ -70,10 +70,11 @@ import { CreateFolderModal } from './components/CreateFolderModal.tsx';
 import { MoveFileModal } from './components/MoveFileModal.tsx';
 import { RenameModal } from './components/RenameModal.tsx';
 import { ConfirmDeleteModal } from './components/ConfirmDeleteModal.tsx';
+import { TorrentSearchPanel } from './components/TorrentSearchPanel.tsx';
 
 export default function App() {
   // Navigation & Theme
-  const [activeTab, setActiveTab] = useState<'transfers' | 'files' | 'shared' | 'activity' | 'storage'>('transfers');
+  const [activeTab, setActiveTab] = useState<'search' | 'transfers' | 'files' | 'shared' | 'activity' | 'storage'>('transfers');
   const [theme, setTheme] = useState<'dark' | 'dim' | 'light'>(() => {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
@@ -105,6 +106,7 @@ export default function App() {
 
   // Modals & Drawers
   const [isAddMagnetOpen, setIsAddMagnetOpen] = useState(false);
+  const [initialMagnet, setInitialMagnet] = useState('');
   const [prioTorrent, setPrioTorrent] = useState<TorrentItem | null>(null);
   const [isCleanupOpen, setIsCleanupOpen] = useState(false);
   const [isQbtSettingsOpen, setIsQbtSettingsOpen] = useState(false);
@@ -250,6 +252,11 @@ export default function App() {
   }, [currentFolder]);
 
   // Actions
+  const handleSearchAdd = (source: string) => {
+    setInitialMagnet(source);
+    setIsAddMagnetOpen(true);
+  };
+
   const handleAddMagnet = async (
     magnet: string,
     category: string,
@@ -612,6 +619,16 @@ export default function App() {
       <div className="hidden md:block bg-slate-900/60 border-b border-slate-800/80 px-6">
         <div className="max-w-7xl mx-auto flex items-center gap-2 py-2">
           <button
+            onClick={() => setActiveTab('search')}
+            className={activeTab === 'search'
+              ? 'px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
+              : 'px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'}
+          >
+            <Search className="w-4 h-4" />
+            <span>Search</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('transfers')}
             className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition ${
               activeTab === 'transfers'
@@ -697,6 +714,11 @@ export default function App() {
               Inspect Disk
             </button>
           </div>
+        )}
+
+        {/* TAB 0: TORRENT SEARCH */}
+        {activeTab === 'search' && (
+          <TorrentSearchPanel onAdd={handleSearchAdd} />
         )}
 
         {/* TAB 1: TRANSFERS & SEEDBOX */}
@@ -1080,6 +1102,16 @@ export default function App() {
       {/* Mobile Bottom Navigation Bar (Requirement 10: mobile friendly) */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-lg border-t border-slate-800 px-2 py-2 flex items-center justify-around">
         <button
+          onClick={() => setActiveTab('search')}
+          className={activeTab === 'search'
+            ? 'flex flex-col items-center gap-1 p-2 rounded-xl transition text-cyan-400'
+            : 'flex flex-col items-center gap-1 p-2 rounded-xl transition text-slate-400'}
+        >
+          <Search className="w-5 h-5" />
+          <span className="text-[10px] font-semibold">Search</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('transfers')}
           className={`flex flex-col items-center gap-1 p-2 rounded-xl transition ${
             activeTab === 'transfers' ? 'text-cyan-400' : 'text-slate-400'
@@ -1133,9 +1165,13 @@ export default function App() {
       {/* Modals */}
       <AddMagnetModal
         isOpen={isAddMagnetOpen}
-        onClose={() => setIsAddMagnetOpen(false)}
+        onClose={() => {
+          setIsAddMagnetOpen(false);
+          setInitialMagnet('');
+        }}
         onAdd={handleAddMagnet}
         defaultFolder={currentFolder === '/' ? 'Downloads' : currentFolder.replace('/', '')}
+        initialMagnet={initialMagnet}
       />
 
       <FilePrioModal
