@@ -672,7 +672,7 @@ export default function App() {
                   <span>Ongoing Downloads & Active Torrents</span>
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  High-speed server torrent downloader with real-time ETA, selective files, and zero 5GB caps.
+                  High-speed server torrent downloader with real-time ETA, selective files.
                 </p>
               </div>
 
