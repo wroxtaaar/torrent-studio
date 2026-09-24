@@ -15,6 +15,7 @@ services:
       - "3000:3000"
     volumes:
       - ./downloads:/app/storage/downloads
+      - ./app-meta:/app/storage/meta
     depends_on:
       qbittorrent:
         condition: service_started
