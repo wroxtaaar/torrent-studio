@@ -188,26 +188,43 @@ async function setFilePriorities(hash: string, manifest: Array<{ priority: numbe
 }
 
 async function inspectMetadata(source: string) {
-  // qBittorrent 5.2+ can fetch metadata without adding the torrent.
-  for (let i = 0; i < 8; i++) {
+  // qBittorrent's fetchMetadata endpoint is asynchronous for magnets.
+  // The first request normally returns HTTP 202 + an infohash, not the
+  // file list. Once metadata is cached, a later request returns HTTP 200
+  // with the complete torrent descriptor.
+  for (let i = 0; i < 20; i++) {
     const params = new URLSearchParams({ source });
     const response = await qbtFetch('/api/v2/torrents/fetchMetadata', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: params,
     });
+
     const text = await response.text();
-    if (!response.ok) throw Object.assign(new Error(text || response.statusText), { status: response.status });
+
+    // 202 is expected while qBittorrent is fetching magnet metadata.
+    if (response.status !== 200 && response.status !== 202) {
+      throw Object.assign(new Error(text || response.statusText), { status: response.status });
+    }
+
     if (text) {
       try {
         const data = JSON.parse(text);
+
+        // A completed descriptor contains the torrent name and its files.
         if (data && (data.name || Array.isArray(data.files))) return data;
+
+        // HTTP 202 normally contains only v1/v2/id infohash data.
+        // Keep polling the same source until qBittorrent's metadata cache
+        // contains the actual descriptor.
       } catch {
-        // Metadata is not ready yet.
+        // Metadata is still being resolved.
       }
     }
+
     await new Promise(resolve => setTimeout(resolve, 750));
   }
+
   return null;
 }
 
