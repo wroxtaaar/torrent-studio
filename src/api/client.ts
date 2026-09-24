@@ -41,6 +41,8 @@ export const api = {
     files: { index: number; name: string; size: number; path: string; type: string }[];
     totalSize: number;
     source: string;
+    pending?: boolean;
+    message?: string;
   }> {
     const res = await fetch('/api/v2/torrents/inspect-magnet', {
       method: 'POST',
