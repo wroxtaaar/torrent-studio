@@ -733,12 +733,48 @@ async function main() {
     }
 
     try {
+      // Prowlarr download endpoints can either return a .torrent file or
+      // redirect to a magnet URI. Do not let Node's fetch follow a magnet
+      // redirect because WHATWG fetch cannot fetch the magnet scheme.
       const upstream = await fetch(grab.url, {
+        redirect: 'manual',
         headers: {
-          'Accept': 'application/x-bittorrent, application/octet-stream, */*',
+          'Accept': 'application/x-bittorrent, application/octet-stream, text/plain, */*',
           'X-Api-Key': prowlarrApiKey,
         },
       });
+
+      if (upstream.status >= 300 && upstream.status < 400) {
+        const location = upstream.headers.get('location') || '';
+        if (/^magnet:\?/i.test(location)) {
+          res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store');
+          return res.status(200).send(location);
+        }
+
+        if (location) {
+          const redirected = await fetch(new URL(location, grab.url), {
+            headers: {
+              'Accept': 'application/x-bittorrent, application/octet-stream, text/plain, */*',
+              'X-Api-Key': prowlarrApiKey,
+            },
+          });
+
+          if (!redirected.ok) {
+            const body = await redirected.text();
+            return res.status(redirected.status).send(body || 'Unable to retrieve torrent from Prowlarr');
+          }
+
+          const data = Buffer.from(await redirected.arrayBuffer());
+          if (!data.length) return res.status(502).send('Prowlarr returned an empty torrent response');
+
+          res.setHeader('Content-Type', redirected.headers.get('content-type') || 'application/x-bittorrent');
+          const disposition = redirected.headers.get('content-disposition');
+          if (disposition) res.setHeader('Content-Disposition', disposition);
+          res.setHeader('Content-Length', String(data.length));
+          return res.send(data);
+        }
+      }
 
       if (!upstream.ok) {
         const body = await upstream.text();
@@ -748,8 +784,12 @@ async function main() {
       const data = Buffer.from(await upstream.arrayBuffer());
       if (!data.length) return res.status(502).send('Prowlarr returned an empty torrent file');
 
-      res.setHeader('Content-Type', upstream.headers.get('content-type') || 'application/x-bittorrent');
+      const contentType = upstream.headers.get('content-type') || '';
       const disposition = upstream.headers.get('content-disposition');
+      res.setHeader(
+        'Content-Type',
+        /^text\/plain/i.test(contentType) ? 'text/plain; charset=utf-8' : (contentType || 'application/x-bittorrent')
+      );
       if (disposition) res.setHeader('Content-Disposition', disposition);
       res.setHeader('Content-Length', String(data.length));
       return res.send(data);
