@@ -67,6 +67,21 @@ function fetchExternalBuffer(
         const status = response.statusCode || 502;
 
         if (status >= 300 && status < 400 && response.headers.location) {
+          const location = String(response.headers.location);
+
+          // Prowlarr can intentionally redirect a release to a magnet URI.
+          // Never pass magnet: to Node's HTTP(S) client; return the redirect
+          // to the caller so it can hand the magnet to qBittorrent.
+          if (/^magnet:\?/i.test(location)) {
+            response.resume();
+            resolve({
+              status,
+              headers: response.headers,
+              data: Buffer.alloc(0),
+            });
+            return;
+          }
+
           response.resume();
 
           if (redirectsLeft <= 0) {
@@ -74,7 +89,7 @@ function fetchExternalBuffer(
             return;
           }
 
-          const next = new URL(response.headers.location, parsed).toString();
+          const next = new URL(location, parsed).toString();
           visit(next, redirectsLeft - 1);
           return;
         }
@@ -801,8 +816,6 @@ async function main() {
       });
 
       if (upstream.status >= 300 && upstream.status < 400) {
-        // fetchExternalBuffer follows HTTP redirects itself, so this branch is
-        // only here defensively for unusual upstream responses.
         const location = String(upstream.headers.location?.[0] || '');
         if (/^magnet:\?/i.test(location)) {
           res.setHeader('Content-Type', 'text/plain; charset=utf-8');
