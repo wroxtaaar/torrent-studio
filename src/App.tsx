@@ -596,23 +596,6 @@ export default function App() {
               {theme === 'light' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-cyan-400" />}
             </button>
 
-            {/* Active User Switcher dropdown */}
-            {activeUser && (
-              <div className="hidden sm:flex items-center pl-1 border-l border-slate-800">
-                <select
-                  value={activeUser.id}
-                  onChange={(e) => handleSwitchUser(e.target.value)}
-                  className="bg-slate-900 border border-slate-800 text-slate-200 text-xs rounded-xl px-2.5 py-1.5 focus:outline-none focus:border-cyan-500 cursor-pointer"
-                  title="Switch Active User Profile"
-                >
-                  {users.map(u => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} ({u.role.toUpperCase()})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
           </div>
         </div>
       </header>
@@ -658,18 +641,6 @@ export default function App() {
             <Folder className="w-4 h-4" />
             <span>My Cloud Files</span>
             <span className="text-[10px] opacity-70">({files.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('shared')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition ${
-              activeTab === 'shared'
-                ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <Share2 className="w-4 h-4" />
-            <span>Shared Storage</span>
           </button>
 
           <button
@@ -1155,22 +1126,6 @@ export default function App() {
                 Theme: {theme}
               </button>
 
-              {activeUser && (
-                <label className="col-span-2 p-3 rounded-xl bg-slate-800 text-slate-200 text-xs font-semibold flex items-center gap-2">
-                  <Users className="w-4 h-4 text-cyan-400" />
-                  <span className="flex-1">Profile</span>
-                  <select
-                    value={activeUser.id}
-                    onChange={(e) => handleSwitchUser(e.target.value)}
-                    className="max-w-[55%] bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-cyan-500"
-                  >
-                    {users.map(u => (
-                      <option key={u.id} value={u.id}>
-                        {u.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
               )}
             </div>
           </div>
@@ -1207,14 +1162,6 @@ export default function App() {
           >
             <Folder className="w-5 h-5" />
             <span className="text-[9px] font-semibold">Files</span>
-          </button>
-
-          <button
-            onClick={() => { setActiveTab('shared'); setIsMobileMoreOpen(false); }}
-            className={`flex flex-col items-center justify-center gap-0.5 min-h-12 px-1 rounded-xl transition ${activeTab === 'shared' ? 'text-cyan-400' : 'text-slate-400'}`}
-          >
-            <Share2 className="w-5 h-5" />
-            <span className="text-[9px] font-semibold">Shared</span>
           </button>
 
           <button
