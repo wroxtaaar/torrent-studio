@@ -146,12 +146,13 @@ export const api = {
     urls: string,
     category = 'Downloads',
     selectedFiles?: number[],
-    manifest?: { name: string; size: number; priority: number }[]
+    manifest?: { name: string; size: number; priority: number }[],
+    existingHash?: string
   ): Promise<void> {
     const res = await fetch('/api/v2/torrents/add', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ urls, category, selectedFiles, manifest })
+      body: JSON.stringify({ urls, category, selectedFiles, manifest, existingHash })
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
