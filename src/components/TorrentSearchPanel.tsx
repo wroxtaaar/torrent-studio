@@ -32,6 +32,45 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
   const [sortBy, setSortBy] = useState<'time' | 'size' | 'seeds'>('time');
   const [sortDirection, setSortDirection] = useState<'desc' | 'asc'>('desc');
   const [minSeeders, setMinSeeders] = useState(1);
+  const [recentSearches, setRecentSearches] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('seedflow_recent_searches');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed)
+        ? parsed.filter((value): value is string => typeof value === 'string').slice(0, 10)
+        : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const saveRecentSearch = (value: string) => {
+    const normalized = value.trim();
+    if (!normalized) return;
+
+    setRecentSearches(prev => {
+      const next = [
+        normalized,
+        ...prev.filter(item => item.toLowerCase() !== normalized.toLowerCase())
+      ].slice(0, 10);
+
+      try {
+        localStorage.setItem('seedflow_recent_searches', JSON.stringify(next));
+      } catch {}
+
+      return next;
+    });
+  };
+
+  const removeRecentSearch = (value: string) => {
+    setRecentSearches(prev => {
+      const next = prev.filter(item => item !== value);
+      try {
+        localStorage.setItem('seedflow_recent_searches', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
 
   const runSearch = async (event?: React.FormEvent) => {
     event?.preventDefault();
@@ -47,6 +86,7 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
     try {
       setIsSearching(true);
       setError('');
+      saveRecentSearch(trimmed);
       const data = await api.searchTorrents(trimmed, 50);
       setResults(data);
       setSearched(true);
@@ -133,6 +173,40 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
             )}
           </button>
         </form>
+
+        {recentSearches.length > 0 && (
+          <div className="mt-3 flex items-start gap-2">
+            <span className="shrink-0 pt-1 text-[11px] font-semibold text-slate-500">
+              Recent
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {recentSearches.map(search => (
+                <div
+                  key={search}
+                  className="flex items-center rounded-lg bg-slate-950 border border-slate-800 overflow-hidden"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setQuery(search)}
+                    className="px-2.5 py-1.5 text-[11px] text-slate-300 hover:text-cyan-300 hover:bg-slate-900 transition max-w-[180px] truncate"
+                    title={`Use recent search: ${search}`}
+                  >
+                    {search}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeRecentSearch(search)}
+                    className="px-1.5 py-1.5 text-slate-600 hover:text-rose-400 hover:bg-slate-900 transition"
+                    aria-label={`Remove ${search} from recent searches`}
+                    title="Remove"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {error && (
