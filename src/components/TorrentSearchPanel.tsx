@@ -32,6 +32,66 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
   const [sortBy, setSortBy] = useState<'time' | 'size' | 'seeds'>('time');
   const [sortDirection, setSortDirection] = useState<'desc' | 'asc'>('desc');
   const [minSeeders, setMinSeeders] = useState(1);
+  const [showRecentSearches, setShowRecentSearches] = useState(false);
+  const [recentSearches, setRecentSearches] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('seedflow_recent_searches');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed)
+        ? parsed.filter((value): value is string => typeof value === 'string').slice(0, 7)
+        : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch('/api/search/recent')
+      .then(response => response.ok ? response.json() : null)
+      .then(data => {
+        if (cancelled) return;
+        const serverRecents = Array.isArray(data?.searches)
+          ? data.searches.filter((value: unknown): value is string => typeof value === 'string').slice(0, 7)
+          : [];
+        if (serverRecents.length > 0) {
+          setRecentSearches(serverRecents);
+          try {
+            localStorage.setItem('seedflow_recent_searches', JSON.stringify(serverRecents));
+          } catch {}
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const saveRecentSearch = (value: string) => {
+    const normalized = value.trim();
+    if (!normalized) return;
+
+    setRecentSearches(prev => {
+      const next = [
+        normalized,
+        ...prev.filter(item => item.toLowerCase() !== normalized.toLowerCase())
+      ].slice(0, 7);
+
+      try {
+        localStorage.setItem('seedflow_recent_searches', JSON.stringify(next));
+      } catch {}
+
+      void fetch('/api/search/recent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ search: normalized })
+      }).catch(() => {});
+
+      return next;
+    });
+  };
 
 
 
@@ -53,7 +113,9 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
 
     try {
       setIsSearching(true);
+      setShowRecentSearches(false);
       setError('');
+      saveRecentSearch(trimmed);
       const data = await api.searchTorrents(trimmed, 50);
       setResults(data);
       setSearched(true);
@@ -113,15 +175,45 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
             <input
               value={query}
+              onFocus={() => {
+                if (recentSearches.length > 0) setShowRecentSearches(true);
+              }}
               onChange={(e) => {
                 setQuery(e.target.value);
                 if (error) setError('');
+                if (recentSearches.length > 0) setShowRecentSearches(true);
               }}
               placeholder="Search movies, TV, music, software..."
               className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20"
             />
 
-
+            {showRecentSearches && recentSearches.length > 0 && (
+              <div className="absolute left-0 right-0 top-full mt-2 z-30 rounded-xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden">
+                <div className="px-3 py-2 border-b border-slate-800">
+                  <span className="text-[11px] font-semibold text-slate-400">Recent Searches</span>
+                </div>
+                <div className="max-h-72 overflow-y-auto">
+                  {recentSearches.slice(0, 7).map((search, index) => (
+                    <button
+                      key={search}
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setQuery(search);
+                        setError('');
+                        setShowRecentSearches(false);
+                      }}
+                      className="w-full px-3 py-2.5 text-left flex items-center gap-2.5 border-b border-slate-800/70 last:border-b-0 hover:bg-slate-800 active:bg-slate-700 transition"
+                    >
+                      <span className="w-5 h-5 shrink-0 rounded-md bg-slate-800 text-slate-500 text-[10px] font-bold flex items-center justify-center">
+                        {index + 1}
+                      </span>
+                      <span className="truncate text-xs text-slate-200">{search}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <button
