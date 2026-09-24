@@ -259,7 +259,9 @@ function scanFiles(): StorageFile[] {
         isStreamable: type === 'video' || type === 'audio',
         ownerId: activeUser().id, ownerName: activeUser().name,
         downloadUrl: '/api/files/download/' + fileId(rel),
-        streamUrl: '/api/files/stream/' + fileId(rel)
+        streamUrl: type === 'video'
+          ? '/api/files/hls/' + fileId(rel) + '/index.m3u8'
+          : '/api/files/stream/' + fileId(rel)
       });
     }
   }
@@ -1126,26 +1128,13 @@ async function main() {
 
     log('stream','File Streamed',f.path,'info');
 
-    // Video playback uses HLS so the browser gets real segment boundaries,
-    // accurate seeking and normal VOD behavior. Audio can use the direct
-    // range streamer.
+    // Video playback uses the canonical HLS manifest route. Audio uses
+    // the direct HTTP range streamer.
     if (f.type !== 'video') {
       return sendFile(req,res,fullPath,false);
     }
 
-    try {
-      const cacheDir = await prepareHls(fullPath);
-      const playlistPath = path.join(cacheDir, 'index.m3u8');
-      const playlist = rewriteHlsPlaylist(fs.readFileSync(playlistPath, 'utf8'), f.id);
-
-      res.setHeader('Content-Type','application/vnd.apple.mpegurl');
-      res.setHeader('Cache-Control','no-store, no-cache, must-revalidate');
-      res.setHeader('Access-Control-Allow-Origin','*');
-      return res.send(playlist);
-    } catch (error: any) {
-      console.error('[STREAM] HLS preparation failed:', error);
-      return res.status(500).send(error?.message || 'Unable to prepare this video for streaming.');
-    }
+    return res.redirect(302, `/api/files/hls/${encodeURIComponent(f.id)}/index.m3u8`);
   });
 
   app.get('/api/files/hls/:id/:asset', async (req,res)=>{
@@ -1166,14 +1155,15 @@ async function main() {
       const cacheDir = hlsCacheDirectory(fullPath);
 
       if (asset.endsWith('.m3u8')) {
-        await waitForHlsReady(cacheDir);
-        const playlistPath = path.join(cacheDir, 'index.m3u8');
+        const preparedDir = await prepareHls(fullPath);
+        const playlistPath = path.join(preparedDir, 'index.m3u8');
         if (!fs.existsSync(playlistPath)) return res.status(404).send('HLS playlist not ready');
 
         const playlist = rewriteHlsPlaylist(fs.readFileSync(playlistPath, 'utf8'), f.id);
         res.setHeader('Content-Type','application/vnd.apple.mpegurl');
         res.setHeader('Cache-Control','no-store, no-cache, must-revalidate');
         res.setHeader('Access-Control-Allow-Origin','*');
+        res.setHeader('Access-Control-Allow-Headers','Range');
         return res.send(playlist);
       }
 
@@ -1183,6 +1173,7 @@ async function main() {
       }
 
       res.type('video/mp4');
+      res.setHeader('Accept-Ranges','bytes');
       res.setHeader('Cache-Control','public, max-age=31536000, immutable');
       res.setHeader('Access-Control-Allow-Origin','*');
       return res.sendFile(assetPath);
