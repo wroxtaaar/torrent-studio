@@ -1,51 +1,75 @@
-# Torrent Studio
+# Torrent Studio — Oracle VPS
 
-Torrent Studio is a web UI backed by a real qBittorrent instance.
+Torrent Studio is a self-hosted web UI for a real qBittorrent instance. Everything runs on your Oracle VPS: the React frontend, Node/Express backend, qBittorrent, and downloaded files.
 
 ## Architecture
 
-Browser → Render/Node backend → qBittorrent on the Oracle VPS → qBittorrent download storage
+Browser → Torrent Studio (Node/Express) → qBittorrent → `./downloads`
 
-The backend now proxies the torrent operations to qBittorrent instead of simulating torrent progress.
+No Render, Cloud Run, or external qBittorrent service is required.
 
-## Render environment variables
+## Docker deployment
 
-Set these in the Render dashboard; do not commit real credentials:
+The repository includes a Docker Compose stack for the Oracle VPS. It runs the app and qBittorrent on the same Docker network, so the backend connects to qBittorrent at `http://qbittorrent:8080`.
 
-- `QBT_URL` — public HTTPS URL of the qBittorrent WebUI/API.
-- `QBT_USERNAME` and `QBT_PASSWORD` — qBittorrent WebUI credentials.
-- Or `QBT_API_KEY` — qBittorrent 5.2+ API key.
+Downloaded data is shared through the host's `./downloads` directory.
 
-Render supplies `PORT`; the server binds to `0.0.0.0:$PORT`.
+### 1. Clone
 
-Do **not** use `http://localhost:8080` for `QBT_URL` on Render. That points back to the Render container, not the Oracle VPS.
+```bash
+git clone https://github.com/wroxtaaar/torrent-studio.git
+cd torrent-studio
+```
+
+### 2. Configure credentials
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Set a strong qBittorrent admin password. Do not commit `.env`.
+
+### 3. Start everything
+
+```bash
+docker compose up -d --build
+```
+
+The web app is available on port `3000` and qBittorrent's WebUI is kept private inside the Docker network.
+
+### 4. Check status
+
+```bash
+docker compose ps
+```
+
+```bash
+curl http://127.0.0.1:3000/health
+```
+
+```bash
+curl http://127.0.0.1:3000/api/v2/app/version
+```
+
+### 5. View logs
+
+```bash
+docker compose logs -f app
+```
+
+qBittorrent logs:
+
+```bash
+docker compose logs -f qbittorrent
+```
 
 ## Selective downloads
 
-The Add Magnet dialog sends selected file indexes to the backend. The backend uses qBittorrent's `filePriorities` support when adding a torrent, using priority 1 for selected files and 0 for skipped files. qBittorrent documents 0 as “Do not download”, 1 as normal, 6 as high, and 7 as maximal. citeturn7search0
+The Add Magnet dialog sends selected file indexes to the backend. The backend passes qBittorrent 5.2.x file priorities when adding the torrent, so files marked as skipped are not downloaded.
 
-## Magnet metadata
+## Important
 
-For qBittorrent 5.2+, the backend uses `torrents/fetchMetadata` to retrieve magnet metadata without adding the torrent first. Metadata can arrive asynchronously, so the backend retries briefly. citeturn6search0
-
-## qBittorrent connectivity
-
-The qBittorrent API must be reachable from Render. qBittorrent 5.2+ supports Basic authentication and API-key authentication, so either credentials or an API key can be used. citeturn3search5turn3search1
-
-Because the WebUI/API is an administrative interface, expose it through HTTPS and authentication rather than an unprotected public port.
-
-## Local development
-
-```bash
-npm install
-cp .env.example .env
-npm run dev
-```
-
-For local qBittorrent:
-
-```
-QBT_URL=http://127.0.0.1:8080
-QBT_USERNAME=admin
-QBT_PASSWORD=your_password
-```
+- Keep qBittorrent's WebUI port private; users interact with it through Torrent Studio.
+- If you want to access Torrent Studio from the internet, put HTTPS/authentication in front of port 3000 rather than exposing qBittorrent's WebUI directly.
+- Torrent data persists in `./downloads` and qBittorrent configuration persists in `./qbittorrent-config`.
