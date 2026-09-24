@@ -399,6 +399,40 @@ async function main() {
     res.json({isExternal:false,host:qbtBase,username:qbtUser,connected,version});
   });
 
+  app.get('/api/torrents/download/:hash/:index',async(req,res)=>{
+    try {
+      const hash=String(req.params.hash);
+      const index=Number(req.params.index);
+      if (!Number.isInteger(index) || index < 0) return res.status(400).send('Invalid file index');
+
+      const list:any[]=await qbtJson('/api/v2/torrents/info?hash='+encodeURIComponent(hash));
+      const t=list?.[0]; if(!t) return res.status(404).send('Torrent not found');
+
+      const files:any[]=await qbtJson('/api/v2/torrents/files?hash='+encodeURIComponent(hash));
+      const file=files.find(f=>Number(f.index)===index);
+      if(!file) return res.status(404).send('Torrent file not found');
+      if(Number(file.priority)<=0) return res.status(409).send('File is not selected for download');
+      if(Number(file.progress)<0.999) return res.status(409).send('File is not complete');
+
+      const qbtRoot=String(t.content_path || t.save_path || '/downloads');
+      const root=qbtRoot.startsWith('/downloads')
+        ? path.join(DOWNLOADS_DIR,qbtRoot.slice('/downloads'.length).replace(/^[/\\]+/,''))
+        : qbtRoot;
+      const rel=String(file.name||'').replace(/^[/\\]+/,'');
+      const candidate=path.resolve(root,rel);
+      const rootResolved=path.resolve(root);
+      if(candidate!==rootResolved && !candidate.startsWith(rootResolved+path.sep)) {
+        return res.status(400).send('Invalid file path');
+      }
+      if(!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) return res.status(404).send('File not found');
+
+      log('download','Torrent File Downloaded',String(file.name||''),'info');
+      return sendFile(req,res,candidate,true);
+    } catch(e:any) {
+      res.status(502).send(e.message||'Download failed');
+    }
+  });
+
   app.get('/api/torrents/download/:hash',async(req,res)=>{
     try {
       const hash=req.params.hash;
