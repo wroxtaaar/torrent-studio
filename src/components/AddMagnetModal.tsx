@@ -45,41 +45,7 @@ interface InspectFileItem {
   selected: boolean;
 }
 
-const SAMPLE_MAGNETS = [
-  {
-    title: 'Ubuntu 24.04.1 LTS Desktop AMD64 Live ISO (6.13 GB)',
-    link: 'magnet:?xt=urn:btih:a1b2c3d4e5f678901234567890abcdef12345678&dn=Ubuntu+24.04.1+LTS+Desktop+AMD64&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce',
-    category: 'Operating Systems',
-    files: [
-      { name: 'ubuntu-24.04.1-desktop-amd64.iso', size: 6138380000, type: 'archive' as const, selected: true },
-      { name: 'SHA256SUMS', size: 1024, type: 'document' as const, selected: true },
-      { name: 'README.diskdefines', size: 18976, type: 'document' as const, selected: false }
-    ]
-  },
-  {
-    title: 'Cosmos Laundromat 4K Open Movie Pack (1.28 GB)',
-    link: 'magnet:?xt=urn:btih:789abc123def4567890abcdef1234567890abcde&dn=Cosmos+Laundromat+First+Cycle+4K&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce',
-    category: 'Movies & Cinema',
-    files: [
-      { name: 'Cosmos_Laundromat_First_Cycle_4K.mp4', size: 1240000000, type: 'video' as const, selected: true },
-      { name: 'Cosmos_Laundromat_Subtitles_EN.srt', size: 28000, type: 'document' as const, selected: true },
-      { name: 'Production_Artwork_And_Notes.pdf', size: 38500000, type: 'document' as const, selected: false }
-    ]
-  },
-  {
-    title: 'Chiptune & Synthwave 2026 FLAC Album (840 MB)',
-    link: 'magnet:?xt=urn:btih:456def789abc0123456789abcdef0123456789ab&dn=Chiptune+and+Synthwave+Discography+FLAC+Lossless&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce',
-    category: 'Lossless Audio & FLAC',
-    files: [
-      { name: '01 - Neon Horizon.flac', size: 185000000, type: 'audio' as const, selected: true },
-      { name: '02 - Midnight Expressway.flac', size: 215000000, type: 'audio' as const, selected: true },
-      { name: '03 - Cybernetic Dreams.flac', size: 198000000, type: 'audio' as const, selected: true },
-      { name: '04 - Starlight Resonance.flac', size: 232000000, type: 'audio' as const, selected: true },
-      { name: 'Album_Cover_Artwork.png', size: 9800000, type: 'other' as const, selected: true },
-      { name: 'AccuRip_Verification_Log.txt', size: 12400, type: 'document' as const, selected: false }
-    ]
-  }
-];
+
 
 export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
   isOpen,
@@ -122,23 +88,6 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       return;
     }
 
-    // Check if it's one of the sample presets
-    const matchedSample = SAMPLE_MAGNETS.find(s => s.link.trim() === link.trim());
-    if (matchedSample) {
-      setCategory(matchedSample.category);
-      setInspectionSource('Sample Preset');
-      setInspectedFiles(
-        matchedSample.files.map((f, i) => ({
-          index: i,
-          name: f.name,
-          size: f.size,
-          type: f.type,
-          selected: f.selected
-        }))
-      );
-      return;
-    }
-
     try {
       setIsInspecting(true);
       setError('');
@@ -171,38 +120,6 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     }
   };
 
-  const generateFallbackFiles = (link: string, count = 16) => {
-    let name = 'Cloud Torrent Download';
-    const dnMatch = link.match(/[?&]dn=([^&]+)/);
-    if (dnMatch) {
-      try {
-        name = decodeURIComponent(dnMatch[1].replace(/\+/g, ' '));
-      } catch {
-        name = dnMatch[1];
-      }
-    }
-
-    const isVideo = name.toLowerCase().includes('mkv') || name.toLowerCase().includes('mp4') || name.toLowerCase().includes('1080') || name.toLowerCase().includes('720');
-    const isFlac = name.toLowerCase().includes('flac') || name.toLowerCase().includes('lossless') || name.toLowerCase().includes('album');
-    const ext = isFlac ? 'flac' : isVideo ? 'mkv' : 'zip';
-    const perSize = isFlac ? 48000000 : isVideo ? 1250000000 : 350000000;
-
-    const list: InspectFileItem[] = [];
-    for (let i = 1; i <= count; i++) {
-      const pad = String(i).padStart(2, '0');
-      const fname = `${name} - File_${pad}.${ext}`;
-      list.push({
-        index: i - 1,
-        name: fname,
-        size: perSize,
-        type: isFlac ? 'audio' : isVideo ? 'video' : 'archive',
-        selected: true
-      });
-    }
-    setInspectedFiles(list);
-    setInspectionSource(`Generated Breakdown (${count} Files)`);
-  };
-
   const handleInputChange = (val: string) => {
     setMagnetInput(val);
     setError('');
@@ -210,22 +127,6 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     inspectTimeoutRef.current = setTimeout(() => {
       triggerInspect(val);
     }, 400);
-  };
-
-  const handleSelectSample = (sample: typeof SAMPLE_MAGNETS[0]) => {
-    setMagnetInput(sample.link);
-    setCategory(sample.category);
-    setError('');
-    setInspectionSource('Preset Sample');
-    setInspectedFiles(
-      sample.files.map((f, i) => ({
-        index: i,
-        name: f.name,
-        size: f.size,
-        type: f.type,
-        selected: f.selected
-      }))
-    );
   };
 
   // Handle direct .torrent file upload
@@ -277,47 +178,6 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     setInspectedFiles(prev =>
       prev.map(f => ({ ...f, selected: f.type === 'audio' }))
     );
-  };
-
-  // Apply custom file count (e.g. 16 files)
-  const applyCustomCount = (count: number) => {
-    if (count < 1 || count > 200) return;
-    setCustomFileCount(count);
-    generateFallbackFiles(magnetInput || 'Custom Torrent Package', count);
-  };
-
-  // Parse pasted file names
-  const applyPastedManifest = () => {
-    if (!pasteManifestText.trim()) return;
-    const lines = pasteManifestText
-      .split('\n')
-      .map(l => l.trim())
-      .filter(Boolean);
-
-    if (lines.length === 0) return;
-
-    const list: InspectFileItem[] = lines.map((line, idx) => {
-      const isVideo = line.toLowerCase().endsWith('.mkv') || line.toLowerCase().endsWith('.mp4') || line.toLowerCase().endsWith('.avi');
-      const isAudio = line.toLowerCase().endsWith('.flac') || line.toLowerCase().endsWith('.mp3') || line.toLowerCase().endsWith('.wav');
-      const isDoc = line.toLowerCase().endsWith('.srt') || line.toLowerCase().endsWith('.txt') || line.toLowerCase().endsWith('.nfo') || line.toLowerCase().endsWith('.pdf');
-      const isArch = line.toLowerCase().endsWith('.zip') || line.toLowerCase().endsWith('.rar') || line.toLowerCase().endsWith('.tar');
-
-      const type = isVideo ? 'video' : isAudio ? 'audio' : isDoc ? 'document' : isArch ? 'archive' : 'other';
-      const size = isVideo ? 1400000000 : isAudio ? 55000000 : isDoc ? 45000 : 250000000;
-
-      return {
-        index: idx,
-        name: line,
-        size,
-        type,
-        selected: true
-      };
-    });
-
-    setInspectedFiles(list);
-    setCustomFileCount(list.length);
-    setInspectionSource(`Custom Manifest (${list.length} files parsed)`);
-    setShowManifestEditor(false);
   };
 
   const selectedFiles = inspectedFiles.filter(f => f.selected);
@@ -394,37 +254,6 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
             </div>
           )}
 
-          {/* Quick Preset Magnet Links */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                Or pick a verified sample torrent:
-              </p>
-              <span className="text-[10px] text-cyan-400 font-mono">1-Click Test</span>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              {SAMPLE_MAGNETS.map((sample, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => handleSelectSample(sample)}
-                  className={`p-2.5 rounded-xl border text-left transition ${
-                    magnetInput === sample.link
-                      ? 'bg-cyan-500/10 border-cyan-500/50 ring-1 ring-cyan-500/30'
-                      : 'bg-slate-800/60 hover:bg-slate-800 border-slate-700/50'
-                  }`}
-                >
-                  <p className={`text-xs font-semibold truncate ${
-                    magnetInput === sample.link ? 'text-cyan-400' : 'text-slate-200'
-                  }`}>
-                    {sample.title}
-                  </p>
-                  <p className="text-[10px] text-slate-400 mt-0.5">{sample.category}</p>
-                </button>
-              ))}
-            </div>
-          </div>
-
           {/* Magnet link input & .torrent upload */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
@@ -447,14 +276,6 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
                   <UploadCloud className="w-3.5 h-3.5" />
                   <span>Upload .torrent</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setShowManifestEditor(!showManifestEditor)}
-                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-[11px] font-medium flex items-center gap-1.5 transition"
-                >
-                  <Sliders className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>{showManifestEditor ? 'Close Editor' : 'Adjust File Count / Manifest'}</span>
-                </button>
               </div>
             </div>
 
@@ -474,66 +295,6 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
               )}
             </div>
           </div>
-
-          {/* Collapsible Manifest Editor (Allows setting exact file count, e.g. 16, or pasting file list) */}
-          {showManifestEditor && (
-            <div className="p-3.5 rounded-xl bg-slate-950/90 border border-slate-800 space-y-3 animate-fadeIn">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-200">
-                  Custom File Count & Manifest Editor
-                </span>
-                <span className="text-[11px] text-slate-400">
-                  Set number of files (e.g. 16) or paste file names
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="p-3 rounded-lg bg-slate-900 border border-slate-800">
-                  <label className="block text-[11px] font-medium text-slate-300 mb-1.5">
-                    Set Exact Number of Files:
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min={1}
-                      max={200}
-                      value={customFileCount}
-                      onChange={(e) => setCustomFileCount(parseInt(e.target.value, 10) || 1)}
-                      className="w-24 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 font-mono"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => applyCustomCount(customFileCount)}
-                      className="px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition"
-                    >
-                      Generate {customFileCount} Files
-                    </button>
-                  </div>
-                </div>
-
-                <div className="p-3 rounded-lg bg-slate-900 border border-slate-800">
-                  <label className="block text-[11px] font-medium text-slate-300 mb-1.5">
-                    Or Paste List of Filenames:
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={pasteManifestText}
-                    onChange={(e) => setPasteManifestText(e.target.value)}
-                    placeholder="Paste 16 filenames, one per line..."
-                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-slate-200 text-xs font-mono placeholder-slate-500 resize-none focus:outline-none focus:border-cyan-500 mb-2"
-                  />
-                  <button
-                    type="button"
-                    onClick={applyPastedManifest}
-                    disabled={!pasteManifestText.trim()}
-                    className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-medium text-xs transition"
-                  >
-                    Apply Pasted File List
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Selective File Download Selection Checklist */}
           {inspectedFiles.length > 0 && (
