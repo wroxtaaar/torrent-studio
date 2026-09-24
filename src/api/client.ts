@@ -77,7 +77,7 @@ export const api = {
   async inspectMagnet(magnet: string, category = 'Downloads'): Promise<{
     name: string;
     hash: string;
-    files: { index: number; name: string; size: number; path: string; type: string }[];
+    files: { index: number; name: string; size: number; path: string; type: string; priority?: number }[];
     totalSize: number;
     source: string;
     pending?: boolean;
