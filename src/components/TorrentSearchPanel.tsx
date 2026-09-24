@@ -31,6 +31,7 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
   const [error, setError] = useState('');
   const [sortBy, setSortBy] = useState<'time' | 'size' | 'seeds'>('time');
   const [sortDirection, setSortDirection] = useState<'desc' | 'asc'>('desc');
+  const [minSeeders, setMinSeeders] = useState(1);
 
   const runSearch = async (event?: React.FormEvent) => {
     event?.preventDefault();
@@ -63,7 +64,7 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
   };
 
   const sortedResults = useMemo(() => {
-    const sorted = [...results];
+    const sorted = results.filter(result => (Number(result.seeders) || 0) >= minSeeders);
 
     sorted.sort((a, b) => {
       let aValue = 0;
@@ -85,7 +86,7 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
     });
 
     return sorted;
-  }, [results, sortBy, sortDirection]);
+  }, [results, minSeeders, sortBy, sortDirection]);
 
   return (
     <div className="space-y-4">
@@ -148,14 +149,28 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
         </div>
       )}
 
-      {results.length > 0 && (
+      {sortedResults.length > 0 && (
         <div className="space-y-2">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-1">
             <div className="text-xs text-slate-400">
-              {results.length} result{results.length === 1 ? '' : 's'}
+              {sortedResults.length} of {results.length} result{results.length === 1 ? '' : 's'}
             </div>
 
             <div className="flex items-center gap-2 text-xs">
+              <select
+                value={minSeeders}
+                onChange={(e) => setMinSeeders(Number(e.target.value))}
+                className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 focus:outline-none focus:border-cyan-500"
+                title="Minimum seeders"
+                aria-label="Minimum seeders"
+              >
+                <option value={0}>All seeders</option>
+                <option value={1}>1+ seeders</option>
+                <option value={5}>5+ seeders</option>
+                <option value={10}>10+ seeders</option>
+                <option value={20}>20+ seeders</option>
+                <option value={50}>50+ seeders</option>
+              </select>
               <div className="flex items-center gap-1.5">
                 <SlidersHorizontal className="w-3.5 h-3.5 text-slate-500" />
                 <select
@@ -256,12 +271,16 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
         </div>
       )}
 
-      {!isSearching && searched && results.length === 0 && !error && (
+      {!isSearching && searched && sortedResults.length === 0 && !error && (
         <div className="py-14 text-center rounded-2xl bg-slate-900 border border-slate-800">
           <Search className="w-10 h-10 text-slate-700 mx-auto mb-3" />
-          <h3 className="text-sm font-bold text-slate-300">No results</h3>
+          <h3 className="text-sm font-bold text-slate-300">
+            {results.length > 0 ? 'No results match your filters' : 'No results'}
+          </h3>
           <p className="text-xs text-slate-500 mt-1">
-            Try a broader search term or enable more torrent indexers.
+            {results.length > 0
+              ? 'Lower the minimum seeders filter to see more results.'
+              : 'Try a broader search term or enable more torrent indexers.'}
           </p>
         </div>
       )}
