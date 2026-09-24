@@ -404,7 +404,7 @@ export function installQbtProxy(app: Express) {
           });
         }
 
-        const category = 'Downloads';
+        const category = String((req.body as any)?.category || 'Downloads');
 
         // The preview flow intentionally creates or reuses the torrent PAUSED.
         // That lets qBittorrent resolve metadata through its normal torrent
