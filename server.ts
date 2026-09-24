@@ -997,12 +997,18 @@ async function main() {
 
       const cacheKey = query.toLowerCase() + '|' + Math.min(Math.max(limit, 1), 100) + '|' + Math.max(offset, 0);
       const cached = torrentSearchCache.get(cacheKey);
-      if (cached && Date.now() - cached.createdAt < 10 * 60 * 1000) {
+      // Only cache successful searches. A temporary indexer/Cloudflare failure
+      // must not turn into a stale "0 results" response for the next 10 minutes.
+      if (cached && cached.results.length > 0 && Date.now() - cached.createdAt < 10 * 60 * 1000) {
         return res.json({ results: cached.results, cached: true });
       }
 
       const results = await searchTorrentIndexer(query, limit, offset);
-      torrentSearchCache.set(cacheKey, { createdAt: Date.now(), results });
+      if (results.length > 0) {
+        torrentSearchCache.set(cacheKey, { createdAt: Date.now(), results });
+      } else {
+        torrentSearchCache.delete(cacheKey);
+      }
 
       if (torrentSearchCache.size > 50) {
         const oldest = [...torrentSearchCache.entries()]
