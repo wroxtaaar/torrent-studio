@@ -144,6 +144,95 @@ async function getFiles(hash: string) {
   return Array.isArray(files) ? files.map(mapFile) : [];
 }
 
+function extractInfoHash(source: string): string {
+  const magnetHash = source.match(/urn:btih:([a-zA-Z0-9]+)/i)?.[1] || '';
+  if (magnetHash) return magnetHash.toLowerCase();
+  if (/^[a-f0-9]{40}$/i.test(source)) return source.toLowerCase();
+  return '';
+}
+
+async function torrentExists(hash: string): Promise<boolean> {
+  if (!hash) return false;
+  try {
+    const list = await qbtJson('/api/v2/torrents/info?hash=' + encodeURIComponent(hash));
+    return Array.isArray(list) && list.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function addTorrentPaused(urls: string, category: string): Promise<string[]> {
+  const form = new URLSearchParams();
+  form.set('urls', urls);
+  if (category) form.set('category', category);
+  form.set('savepath', '/downloads');
+  form.set('autoTMM', 'false');
+  form.set('paused', 'true');
+
+  const upstream = await qbtJson('/api/v2/torrents/add', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form,
+  });
+
+  console.log('[QBT-PROXY] paused add response:', upstream);
+
+  const addedIds = Array.isArray(upstream?.added_torrent_ids)
+    ? upstream.added_torrent_ids.map((id: any) => String(id))
+    : [];
+
+  const sourceHash = extractInfoHash(urls);
+  const hashes = addedIds.length ? addedIds : (sourceHash ? [sourceHash] : []);
+
+  if (!hashes.length) {
+    throw Object.assign(
+      new Error('qBittorrent accepted the torrent but did not return its hash.'),
+      { status: 502 }
+    );
+  }
+
+  return hashes;
+}
+
+function classifyFileType(name: string): 'video' | 'audio' | 'archive' | 'document' | 'other' {
+  const lower = String(name || '').toLowerCase();
+  if (/\.(mp4|mkv|m4v|webm|mov|avi|wmv|flv|ts|m2ts)$/.test(lower)) return 'video';
+  if (/\.(mp3|wav|flac|aac|ogg|m4a|opus|wma)$/.test(lower)) return 'audio';
+  if (/\.(zip|rar|7z|tar|gz|bz2|xz|iso)$/.test(lower)) return 'archive';
+  if (/\.(pdf|txt|md|json|csv|srt|vtt|ass|sub)$/.test(lower)) return 'document';
+  return 'other';
+}
+
+function mapInspectFiles(files: any[]) {
+  return files.map((f: any, index: number) => {
+    const name = f.name || f.path || `File_${index + 1}`;
+    return {
+      index: Number(f.index ?? index),
+      name,
+      size: Number(f.size ?? f.length ?? 0),
+      path: f.path || name,
+      type: classifyFileType(name),
+      priority: Number(f.priority ?? 0),
+    };
+  });
+}
+
+async function waitForTorrentFiles(hash: string, attempts = 20, delayMs = 1000): Promise<any[]> {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const files = await getFiles(hash);
+      if (files.length) {
+        console.log(`[QBT-PROXY] torrent ${hash}: metadata ready on attempt ${attempt}`);
+        return files;
+      }
+    } catch {
+      // qBittorrent can return an error while magnet metadata is still pending.
+    }
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+  }
+  return [];
+}
+
 async function waitForTorrent(hash: string, attempts = 12): Promise<any | null> {
   for (let i = 0; i < attempts; i++) {
     try {
@@ -305,35 +394,53 @@ export function installQbtProxy(app: Express) {
       }
 
       if (route === '/torrents/inspect-magnet' && method === 'POST') {
-        const magnet = String((req.body as any)?.magnet || '').trim();
-        if (!magnet) return res.status(400).json({ error: 'No magnet provided' });
-        const metadata = await inspectMetadata(magnet);
-        if (!metadata) {
-          return res.status(202).json({
-            name: new URLSearchParams(magnet.split('?')[1] || '').get('dn') || 'Torrent',
-            hash: (magnet.match(/urn:btih:([a-zA-Z0-9]+)/i)?.[1] || '').toLowerCase(),
-            files: [],
-            totalSize: 0,
-            source: 'qbt_metadata_pending'
+        const source = String((req.body as any)?.magnet || '').trim();
+        if (!source) return res.status(400).json({ error: 'No magnet provided' });
+
+        const sourceHash = extractInfoHash(source);
+        if (!sourceHash && !/^https?:\/\//i.test(source)) {
+          return res.status(400).json({
+            error: 'Please provide a valid magnet URI, 40-character torrent hash, or .torrent URL.'
           });
         }
-        const rawFiles = Array.isArray(metadata.files) ? metadata.files : [];
-        const files = rawFiles.map((f: any, index: number) => ({
-          index: Number(f.index ?? index),
-          name: f.name || f.path || `File_${index + 1}`,
-          size: Number(f.size ?? f.length ?? 0),
-          path: f.path || f.name || '',
-          type: String(f.name || f.path || '').toLowerCase().endsWith('.mp4') ? 'video' :
-            String(f.name || f.path || '').toLowerCase().endsWith('.mkv') ? 'video' :
-            String(f.name || f.path || '').toLowerCase().endsWith('.mp3') ? 'audio' :
-            String(f.name || f.path || '').toLowerCase().endsWith('.flac') ? 'audio' : 'other',
-        }));
+
+        const category = 'Downloads';
+
+        // The preview flow intentionally creates or reuses the torrent PAUSED.
+        // That lets qBittorrent resolve metadata through its normal torrent
+        // engine, while guaranteeing nothing starts before the user selects files.
+        let hash = sourceHash;
+        if (hash && await torrentExists(hash)) {
+          await qbtJson('/api/v2/torrents/stop', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ hashes: hash }),
+          });
+        } else {
+          const hashes = await addTorrentPaused(source, category);
+          hash = hashes[0];
+        }
+
+        const files = await waitForTorrentFiles(hash, 10, 1000);
+        if (!files.length) {
+          return res.status(202).json({
+            name: 'Torrent',
+            hash,
+            files: [],
+            totalSize: 0,
+            source: 'qbt_torrent_pending',
+            pending: true,
+            message: 'Torrent has been added paused. qBittorrent is still obtaining its file metadata.'
+          });
+        }
+
+        const mappedFiles = mapInspectFiles(files);
         return res.json({
-          name: metadata.name || 'Torrent',
-          hash: String(metadata.infohash || metadata.hash || '').toLowerCase(),
-          files,
-          totalSize: files.reduce((sum: number, f: any) => sum + f.size, 0),
-          source: 'qbt_metadata'
+          name: 'Torrent',
+          hash,
+          files: mappedFiles,
+          totalSize: mappedFiles.reduce((sum: number, f: any) => sum + f.size, 0),
+          source: 'qbt_torrent_files'
         });
       }
 
@@ -405,9 +512,9 @@ export function installQbtProxy(app: Express) {
         const selectedFiles = Array.isArray(body.selectedFiles) ? body.selectedFiles.map(Number) : [];
         const manifest = Array.isArray(body.manifest) ? body.manifest : [];
 
-        // Selection is mandatory. Never allow a torrent to start with the
-        // default qBittorrent priorities, otherwise every file can begin
-        // downloading before the UI selection is applied.
+        // Selection is mandatory. Keep the torrent paused until priorities
+        // are applied, whether this is a new torrent or the paused preview
+        // torrent created by /torrents/inspect-magnet.
         if (!manifest.length || !selectedFiles.length) {
           return res.status(400).json({
             error: 'File selection is required. Select at least one file before starting the torrent.'
@@ -415,32 +522,18 @@ export function installQbtProxy(app: Express) {
         }
 
         const category = String(body.category || 'Downloads');
+        const sourceHash = extractInfoHash(urls);
+        let hashes: string[] = [];
 
-        const form = new URLSearchParams();
-        form.set('urls', urls);
-        if (category) form.set('category', category);
-        form.set('savepath', '/downloads');
-        form.set('autoTMM', 'false');
-        form.set('paused', 'true');
-
-        const upstream = await qbtJson('/api/v2/torrents/add', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: form,
-        });
-
-        console.log('[QBT-PROXY] add response:', upstream);
-
-        const addedIds = Array.isArray(upstream?.added_torrent_ids)
-          ? upstream.added_torrent_ids.map((id: any) => String(id))
-          : [];
-        const magnetHash = (urls.match(/urn:btih:([a-zA-Z0-9]+)/i)?.[1] || '').toLowerCase();
-        const hashes = addedIds.length ? addedIds : (magnetHash ? [magnetHash] : []);
-
-        if (!hashes.length) {
-          return res.status(502).json({
-            error: 'qBittorrent added the torrent but did not return its hash, so file selection could not be applied safely.'
+        if (sourceHash && await torrentExists(sourceHash)) {
+          hashes = [sourceHash];
+          await qbtJson('/api/v2/torrents/stop', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ hashes: sourceHash }),
           });
+        } else {
+          hashes = await addTorrentPaused(urls, category);
         }
 
         const selectedSet = new Set(selectedFiles.map(Number));
@@ -449,17 +542,15 @@ export function installQbtProxy(app: Express) {
         );
 
         for (const hash of hashes) {
-          // Wait until magnet metadata/files are available while the torrent
-          // remains paused. This guarantees unchecked files never start.
           let files: any[] = [];
-          for (let attempt = 0; attempt < 30; attempt++) {
+          for (let attempt = 0; attempt < 60; attempt++) {
             try {
               files = await getFiles(hash);
               if (files.length >= manifest.length) break;
             } catch {
               // metadata is still resolving
             }
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(resolve => setTimeout(resolve, 1000));
           }
 
           if (files.length === 0) {
@@ -467,7 +558,7 @@ export function installQbtProxy(app: Express) {
               ok: true,
               hash,
               selectionPending: true,
-              message: 'Torrent added paused; waiting for metadata before applying file selection.'
+              message: 'Torrent is still waiting for metadata. It remains paused and will not download files yet.'
             });
           }
 
