@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import * as archiver from 'archiver';
 import { installQbtProxy } from './src/qbtProxy.ts';
@@ -339,8 +340,67 @@ async function main() {
   app.get('/api/files/stream/:id', (req,res)=>{
     const f = scanFiles().find(x=>x.id===req.params.id);
     if (!f) return res.status(404).send('File not found');
+
+    const fullPath = physicalFromRelative(f.path.slice(1));
+    if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) {
+      return res.status(404).send('File not found');
+    }
+
     log('stream','File Streamed',f.path,'info');
-    sendFile(req,res,physicalFromRelative(f.path.slice(1)),false);
+
+    const ext = path.extname(fullPath).toLowerCase();
+    // Browsers do not reliably play Matroska/AVI/TS containers. Convert
+    // these on the VPS to fragmented MP4 for HTML5 playback.
+    const needsTranscode = ['.mkv', '.avi', '.flv', '.ts', '.m2ts'].includes(ext);
+
+    if (!needsTranscode) {
+      return sendFile(req,res,fullPath,false);
+    }
+
+    res.setHeader('Content-Type','video/mp4');
+    res.setHeader('Cache-Control','no-cache');
+    res.setHeader('Accept-Ranges','none');
+
+    const ffmpeg = spawn('ffmpeg', [
+      '-hide_banner',
+      '-loglevel', 'error',
+      '-i', fullPath,
+      '-map', '0:v:0',
+      '-map', '0:a:0?',
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-crf', '23',
+      '-c:a', 'aac',
+      '-b:a', '160k',
+      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+      '-f', 'mp4',
+      'pipe:1'
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+
+    let stderr = '';
+    ffmpeg.stderr.on('data', chunk => {
+      stderr += chunk.toString();
+      if (stderr.length > 4000) stderr = stderr.slice(-4000);
+    });
+
+    req.on('close', () => {
+      if (!ffmpeg.killed) ffmpeg.kill('SIGKILL');
+    });
+
+    ffmpeg.on('error', error => {
+      console.error('[STREAM] ffmpeg start failed:', error);
+      if (!res.headersSent) res.status(500).send('Server-side streaming requires ffmpeg on the VPS.');
+      else res.end();
+    });
+
+    ffmpeg.on('close', code => {
+      if (code !== 0 && stderr.trim()) {
+        console.error(`[STREAM] ffmpeg exited with code ${code}: ${stderr.trim()}`);
+      }
+      if (!res.writableEnded) res.end();
+    });
+
+    ffmpeg.stdout.pipe(res);
   });
 
   app.post('/api/files/zip',(req,res)=>{
