@@ -170,14 +170,20 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
                 </select>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setSortDirection(prev => prev === 'desc' ? 'asc' : 'desc')}
-                className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:border-slate-700 transition"
-                title={sortDirection === 'desc' ? 'Descending' : 'Ascending'}
+              <select
+                value={sortDirection}
+                onChange={(e) => setSortDirection(e.target.value as 'desc' | 'asc')}
+                className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 focus:outline-none focus:border-cyan-500"
+                title="Sort order"
+                aria-label="Sort order"
               >
-                {sortDirection === 'desc' ? '↓' : '↑'}
-              </button>
+                <option value="desc">
+                  {sortBy === 'time' ? 'Newest first' : sortBy === 'size' ? 'Largest first' : 'Most seeds first'}
+                </option>
+                <option value="asc">
+                  {sortBy === 'time' ? 'Oldest first' : sortBy === 'size' ? 'Smallest first' : 'Fewest seeds first'}
+                </option>
+              </select>
             </div>
           </div>
 
