@@ -99,7 +99,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
             name: f.name,
             size: f.size,
             type: (f.type as any) || 'other',
-            selected: true
+            selected: false
           }))
         );
         setCustomFileCount(data.files.length);
@@ -146,7 +146,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
           name: f.name,
           size: f.size,
           type: (f.type as any) || 'other',
-          selected: true
+          selected: false
         }))
       );
       setCustomFileCount(data.files.length);
