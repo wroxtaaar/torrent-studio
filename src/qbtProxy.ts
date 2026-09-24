@@ -192,7 +192,7 @@ async function inspectMetadata(source: string) {
   // The first request normally returns HTTP 202 + an infohash, not the
   // file list. Once metadata is cached, a later request returns HTTP 200
   // with the complete torrent descriptor.
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < 60; i++) {
     const params = new URLSearchParams({ source });
     const response = await qbtFetch('/api/v2/torrents/fetchMetadata', {
       method: 'POST',
@@ -201,7 +201,7 @@ async function inspectMetadata(source: string) {
     });
 
     const text = await response.text();
-    console.log(`[QBT-PROXY] fetchMetadata attempt ${i + 1}/20 -> HTTP ${response.status}: ${text.slice(0, 500)}`);
+    console.log(`[QBT-PROXY] fetchMetadata attempt ${i + 1}/60 -> HTTP ${response.status}: ${text.slice(0, 500)}`);
 
     // 202 is expected while qBittorrent is fetching magnet metadata.
     if (response.status !== 200 && response.status !== 202) {
@@ -223,7 +223,7 @@ async function inspectMetadata(source: string) {
       }
     }
 
-    await new Promise(resolve => setTimeout(resolve, 750));
+    await new Promise(resolve => setTimeout(resolve, 1000));
   }
 
   return null;
