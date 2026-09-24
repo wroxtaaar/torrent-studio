@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "NODE_ENV=development PORT=3000 tsx watch server.ts",
+    "dev": "NODE_ENV=development PORT=3000 QBT_URL=http://$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' torrent-qbittorrent):8080 tsx watch server.ts",
     "build": "vite build",
     "start": "NODE_ENV=production tsx server.ts",
     "preview": "vite preview",
