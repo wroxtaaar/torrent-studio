@@ -29,10 +29,13 @@ export const TorrentCard: React.FC<TorrentCardProps> = ({
 }) => {
   const [isActionPending, setIsActionPending] = useState(false);
 
-  const isCompleted = torrent.state === 'completed' || torrent.progress >= 1;
-  const isDownloading = torrent.state === 'downloading';
-  const isStalled = torrent.state === 'stalledDL';
-  const isPaused = torrent.state === 'pausedDL';
+  // qBittorrent 5.x can report stoppedDL/stoppedUP. Normalize the raw
+  // state here as a defensive fallback so the Resume action is never hidden.
+  const rawState = String(torrent.state);
+  const isCompleted = (rawState === 'completed' || rawState === 'pausedUP' || rawState === 'stoppedUP') || torrent.progress >= 1;
+  const isDownloading = rawState === 'downloading' || rawState === 'forcedDL' || rawState === 'metaDL' || rawState === 'forcedMetaDL';
+  const isStalled = rawState === 'stalledDL';
+  const isPaused = rawState === 'pausedDL' || rawState === 'stoppedDL';
   const canPause = isDownloading || isStalled;
   const canResume = isPaused;
 
