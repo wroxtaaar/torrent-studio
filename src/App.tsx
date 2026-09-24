@@ -273,6 +273,39 @@ export default function App() {
     setActiveTab('transfers');
   };
 
+  const handleStreamTorrent = (torrent: TorrentItem) => {
+    const streamableFile = torrent.files?.find(file => {
+      if (file.priority <= 0 || file.progress < 0.999) return false;
+      return /\.(mkv|mp4|m4v|webm|mov|avi|mp3|wav|flac|aac|ogg|m4a)$/i.test(file.name);
+    });
+
+    if (!streamableFile) return;
+
+    const lower = streamableFile.name.toLowerCase();
+    const type: StorageFile['type'] =
+      /\.(mkv|mp4|m4v|webm|mov|avi)$/i.test(lower) ? 'video' : 'audio';
+
+    const syntheticFile: StorageFile = {
+      id: `torrent-${torrent.hash}-${streamableFile.index}`,
+      name: streamableFile.name.split('/').pop() || streamableFile.name,
+      path: streamableFile.path || streamableFile.name,
+      folder: torrent.category || '/',
+      size: streamableFile.size,
+      type,
+      mimeType: type === 'video' ? 'video/mp4' : 'audio/mpeg',
+      createdAt: torrent.completion_on ? torrent.completion_on * 1000 : Date.now(),
+      torrentHash: torrent.hash,
+      isStreamable: true,
+      ownerId: activeUser?.id || 'user_admin',
+      ownerName: activeUser?.name || 'Admin',
+      downloadUrl: `/api/torrents/download/${encodeURIComponent(torrent.hash)}/${streamableFile.index}`,
+      streamUrl: `/api/torrents/stream/${encodeURIComponent(torrent.hash)}/${streamableFile.index}`
+    };
+
+    setActiveMediaFile(syntheticFile);
+    setIsPlayerMinimized(false);
+  };
+
   const handlePauseTorrent = async (hash: string) => {
     // Update immediately and hold that state through the next few polling
     // cycles while qBittorrent finishes applying stop().
@@ -748,6 +781,7 @@ export default function App() {
                     onResume={handleResumeTorrent}
                     onDelete={handleDeleteTorrent}
                     onSelectFiles={(t) => setPrioTorrent(t)}
+                    onStream={handleStreamTorrent}
                   />
                 ))}
               </div>
