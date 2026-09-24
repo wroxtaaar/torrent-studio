@@ -310,7 +310,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 md:p-6 bg-black/80 backdrop-blur-sm animate-fadeIn">
       <div 
-        className="relative w-full max-w-3xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[94vh]"
+        className="relative w-full max-w-3xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[96vh] sm:max-h-[94vh]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
@@ -335,7 +335,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
         </div>
 
         {/* Modal Body */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4">
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-3 sm:p-5 space-y-3 sm:space-y-4">
           {error && (
             <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-center gap-2.5">
               <AlertCircle className="w-4 h-4 shrink-0" />
@@ -349,7 +349,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
               <label className="block text-xs font-semibold text-slate-300">
                 Magnet URI / Torrent Hash
               </label>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 w-full sm:w-auto">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -490,7 +490,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
               </div>
 
               {/* Selection summary bar */}
-              <div className="p-2.5 bg-slate-950 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+              <div className="p-2.5 bg-slate-950 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 text-[11px] sm:text-xs text-slate-400">
                 <span>
                   Selected: <strong className="text-cyan-400">{selectedCount}</strong> of {inspectedFiles.length} files ({inspectedFiles.length - selectedCount} skipped)
                 </span>
@@ -533,8 +533,8 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
         </form>
 
         {/* Modal Footer */}
-        <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-t border-slate-800 bg-slate-900/95">
-          <div className="text-xs text-slate-400">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 px-3 sm:px-5 py-3 border-t border-slate-800 bg-slate-900/95">
+          <div className="text-[11px] sm:text-xs text-slate-400 w-full sm:w-auto">
             {selectedCount > 0 ? (
               <span>Downloading <strong className="text-cyan-400">{selectedCount}</strong> file(s) ({formatBytes(totalSelectedSize)}) • {inspectedFiles.length - selectedCount} skipped</span>
             ) : inspectedFiles.length > 0 ? (
@@ -568,7 +568,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
                 isInspecting ||
                 (inspectedFiles.length > 0 && selectedCount === 0)
               }
-              className="px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 text-xs font-bold transition flex items-center gap-2 shadow-lg shadow-cyan-500/20"
+              className="flex-1 sm:flex-none px-4 sm:px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 text-xs font-bold transition flex items-center gap-2 shadow-lg shadow-cyan-500/20"
             >
               {isInspecting ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
