@@ -47,8 +47,31 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ magnet })
     });
-    if (!res.ok) throw new Error('Failed to inspect magnet metadata');
-    return res.json();
+    const body = await res.text();
+    let data: any = null;
+    try {
+      data = body ? JSON.parse(body) : null;
+    } catch {
+      // Keep the raw qBittorrent response below.
+    }
+
+    if (!res.ok && res.status !== 202) {
+      const message =
+        data?.error ||
+        data?.message ||
+        body ||
+        `qBittorrent metadata inspection failed (HTTP ${res.status})`;
+      throw new Error(message);
+    }
+
+    return data || {
+      name: 'Torrent',
+      hash: '',
+      files: [],
+      totalSize: 0,
+      source: 'qbt_metadata_pending',
+      message: `qBittorrent is still resolving the torrent metadata (HTTP ${res.status}).`
+    };
   },
 
   async uploadTorrentFile(file: File): Promise<{
