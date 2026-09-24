@@ -137,7 +137,7 @@ export const QbtSettingsModal: React.FC<QbtSettingsModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3.5 border-t border-slate-800 bg-slate-900/90 flex items-center justify-between">
+        <div className="px-3 sm:px-5 py-3.5 border-t border-slate-800 bg-slate-900/90 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
           <button
             type="button"
             onClick={handleTestConnection}
@@ -148,7 +148,7 @@ export const QbtSettingsModal: React.FC<QbtSettingsModalProps> = ({
             <span>Test Connection</span>
           </button>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
             <button
               type="button"
               onClick={onClose}
