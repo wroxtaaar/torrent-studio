@@ -883,10 +883,14 @@ async function main() {
       return res.status(404).send('Search result download link not found. Please search again to generate a fresh link.');
     }
 
+    // If the local token survived a restart but its TTL elapsed, refresh the
+    // release metadata from Prowlarr before giving up. This also handles
+    // Prowlarr's own short-lived download URLs transparently.
     if (grab.expiresAt <= Date.now()) {
-      torrentSearchGrabs.delete(token);
-      persistTorrentSearchGrabs();
-      return res.status(410).send('Search result download link expired. Please search again to generate a fresh link.');
+      const refreshed = await refreshTorrentSearchGrab(grab);
+      if (!refreshed) {
+        return res.status(410).send('Search result download link expired. Search again to generate a fresh link.');
+      }
     }
 
     try {
