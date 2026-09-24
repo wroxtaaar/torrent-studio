@@ -18,6 +18,7 @@ interface TorrentCardProps {
   onResume: (hash: string) => Promise<void>;
   onDelete: (hash: string) => void;
   onSelectFiles: (torrent: TorrentItem) => void;
+  onStream: (torrent: TorrentItem) => void;
 }
 
 export const TorrentCard: React.FC<TorrentCardProps> = ({
@@ -25,7 +26,8 @@ export const TorrentCard: React.FC<TorrentCardProps> = ({
   onPause,
   onResume,
   onDelete,
-  onSelectFiles
+  onSelectFiles,
+  onStream
 }) => {
   const [isActionPending, setIsActionPending] = useState(false);
 
@@ -127,6 +129,25 @@ export const TorrentCard: React.FC<TorrentCardProps> = ({
                 : `${totalFiles} files`}
             </span>
           </button>
+
+          {/* Stream completed media */}
+          {isCompleted && (() => {
+            const streamableFile = torrent.files?.find(f => {
+              if (f.priority <= 0 || f.progress < 0.999) return false;
+              return /\.(mkv|mp4|m4v|webm|mov|avi|mp3|wav|flac|aac|ogg|m4a)$/i.test(f.name);
+            });
+
+            return streamableFile ? (
+              <button
+                onClick={() => onStream(torrent)}
+                className="px-2.5 py-1.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/30 text-cyan-400 text-xs font-semibold transition tap-target flex items-center gap-1.5 justify-center"
+                title="Stream completed media"
+              >
+                <Play className="w-4 h-4 fill-current" />
+                <span className="hidden sm:inline text-xs font-bold">Stream</span>
+              </button>
+            ) : null;
+          })()}
 
           {/* Direct Download for completed torrents */}
           {isCompleted && (
