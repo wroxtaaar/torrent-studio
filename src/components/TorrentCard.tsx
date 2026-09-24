@@ -82,7 +82,15 @@ export const TorrentCard: React.FC<TorrentCardProps> = ({
   };
 
   return (
-    <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-slate-700/80 transition shadow-lg flex flex-col gap-3 group">
+    <div
+      onClick={(event) => {
+        const target = event.target as HTMLElement;
+        if (target.closest('button, a, input, select, textarea')) return;
+        onSelectFiles(torrent);
+      }}
+      className="p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-slate-700/80 transition shadow-lg flex flex-col gap-3 group cursor-pointer"
+      title="Open files"
+    >
       {/* Top row: Title and Status */}
       <div className="flex items-start justify-between gap-2">
         <div className="overflow-hidden flex-1">
