@@ -13,7 +13,7 @@ ENV NODE_ENV=production
 ENV PORT=3000
 
 COPY --from=build /app/package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci
 
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/server.ts ./server.ts
