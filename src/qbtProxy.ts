@@ -543,6 +543,7 @@ export function installQbtProxy(app: Express) {
       route === '/auth/logout' ||
       route === '/torrents/info' ||
       route === '/torrents/files' ||
+      route === '/torrents/export' ||
       route === '/torrents/add' ||
       route === '/torrents/upload-torrent' ||
       route === '/torrents/filePrio' ||
@@ -601,6 +602,31 @@ export function installQbtProxy(app: Express) {
         const hash = String(req.query.hash || '');
         if (!hash) return res.status(400).json({ error: 'hash is required' });
         return res.json(await getFiles(hash));
+      }
+
+      if (route === '/torrents/export' && method === 'GET') {
+        const hash = String(req.query.hash || '').trim().toLowerCase();
+        if (!hash) return res.status(400).json({ error: 'hash is required' });
+
+        const upstream = await qbtFetch('/api/v2/torrents/export?hash=' + encodeURIComponent(hash), {
+          headers: { Accept: 'application/x-bittorrent, application/octet-stream, */*' }
+        });
+
+        if (!upstream.ok) {
+          const body = await upstream.text();
+          throw Object.assign(
+            new Error(body || 'qBittorrent could not export this torrent'),
+            { status: upstream.status }
+          );
+        }
+
+        const data = Buffer.from(await upstream.arrayBuffer());
+        if (!data.length) return res.status(502).send('qBittorrent returned an empty torrent file');
+
+        res.setHeader('Content-Type', upstream.headers.get('content-type') || 'application/x-bittorrent');
+        res.setHeader('Content-Disposition', `attachment; filename="${hash}.torrent"`);
+        res.setHeader('Content-Length', String(data.length));
+        return res.send(data);
       }
 
       if (route === '/torrents/inspect-magnet' && method === 'POST') {
