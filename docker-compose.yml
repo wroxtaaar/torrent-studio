@@ -21,6 +21,21 @@ services:
     networks:
       - torrent
 
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: torrent-flaresolverr
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: info
+      LOG_FILE: none
+      LOG_HTML: "false"
+      CAPTCHA_SOLVER: none
+      TZ: Asia/Kolkata
+    expose:
+      - "8191"
+    networks:
+      - torrent
+
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
     container_name: torrent-prowlarr
