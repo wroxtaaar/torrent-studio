@@ -407,10 +407,14 @@ async function main() {
       const files:any[]=await qbtJson('/api/v2/torrents/files?hash='+encodeURIComponent(hash));
       const selected=files.filter(f=>Number(f.priority)>0 && Number(f.progress)>=0.999);
       if(!selected.length) return res.status(409).send('Torrent files are not complete');
-      const root=String(t.content_path || '');
+      const qbtRoot=String(t.content_path || t.save_path || '/downloads');
+      const root = qbtRoot.startsWith('/downloads')
+        ? path.join(DOWNLOADS_DIR, qbtRoot.slice('/downloads'.length).replace(/^[/\\\\]+/,''))
+        : qbtRoot;
       if(selected.length===1){
-        const rel=String(selected[0].name||'').replace(/^[/\\]+/,'');
-        const full=path.isAbsolute(root) && fs.statSync(root).isFile?.() ? root : path.join(root,rel);
+        const rel=String(selected[0].name||'').replace(/^[/\\\\]+/,'');
+        const candidate=path.join(root,rel);
+        const full=fs.existsSync(candidate) ? candidate : (fs.existsSync(root) && fs.statSync(root).isFile() ? root : candidate);
         return sendFile(req,res,full,true);
       }
       res.setHeader('Content-Type','application/zip'); res.setHeader('Content-Disposition',`attachment; filename="${encodeURIComponent(t.name)}.zip"`);
