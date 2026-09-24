@@ -88,7 +88,15 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
         enableWorker: true,
         lowLatencyMode: false,
         backBufferLength: 90,
-        maxBufferLength: 60
+        maxBufferLength: 60,
+        manifestLoadingTimeOut: 30000,
+        manifestLoadingMaxRetry: 4,
+        manifestLoadingRetryDelay: 1000,
+        levelLoadingTimeOut: 30000,
+        levelLoadingMaxRetry: 4,
+        fragLoadingTimeOut: 30000,
+        fragLoadingMaxRetry: 4,
+        startFragPrefetch: true
       });
 
       hlsRef.current = hls;
@@ -129,7 +137,7 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
     }
 
     setMediaError('This browser does not support HLS playback.');
-  }, [file?.id, file?.streamUrl, isVideo, isMinimized]);
+  }, [file?.id, file?.streamUrl, isVideo]);
 
   if (!file) return null;
 
