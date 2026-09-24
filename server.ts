@@ -816,7 +816,11 @@ async function main() {
       });
 
       if (upstream.status >= 300 && upstream.status < 400) {
-        const location = String(upstream.headers.location?.[0] || '');
+        const rawLocation = upstream.headers.location;
+        const location = Array.isArray(rawLocation)
+          ? String(rawLocation[0] || '')
+          : String(rawLocation || '');
+
         if (/^magnet:\?/i.test(location)) {
           res.setHeader('Content-Type', 'text/plain; charset=utf-8');
           res.setHeader('Cache-Control', 'no-store');
@@ -832,8 +836,14 @@ async function main() {
       const data = upstream.data;
       if (!data.length) return res.status(502).send('Prowlarr returned an empty torrent file');
 
-      const contentType = String(upstream.headers['content-type']?.[0] || '');
-      const disposition = String(upstream.headers['content-disposition']?.[0] || '');
+      const rawContentType = upstream.headers['content-type'];
+      const rawDisposition = upstream.headers['content-disposition'];
+      const contentType = Array.isArray(rawContentType)
+        ? String(rawContentType[0] || '')
+        : String(rawContentType || '');
+      const disposition = Array.isArray(rawDisposition)
+        ? String(rawDisposition[0] || '')
+        : String(rawDisposition || '');
       res.setHeader(
         'Content-Type',
         /^text\/plain/i.test(contentType) ? 'text/plain; charset=utf-8' : (contentType || 'application/x-bittorrent')
