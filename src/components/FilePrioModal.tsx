@@ -129,7 +129,9 @@ export const FilePrioModal: React.FC<FilePrioModalProps> = ({
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
-          {localFiles.map((file) => {
+          {[...localFiles]
+            .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
+            .map((file) => {
             const isChecked = file.priority > 0;
             return (
               <div
