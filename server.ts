@@ -31,6 +31,7 @@ const FOLDERS_FILE = path.join(META_DIR, 'folders.json');
 const LOGS_FILE = path.join(META_DIR, 'logs.json');
 const NOTIFICATIONS_FILE = path.join(META_DIR, 'notifications.json');
 const CLEANUP_FILE = path.join(META_DIR, 'cleanup.json');
+const TORRENT_SEARCH_GRABS_FILE = path.join(META_DIR, 'torrent-search-grabs.json');
 
 for (const dir of [STORAGE_DIR, DOWNLOADS_DIR, META_DIR, STREAM_CACHE_DIR, HLS_CACHE_DIR]) fs.mkdirSync(dir, { recursive: true });
 
@@ -48,8 +49,16 @@ type TorrentSearchGrab = {
   guid?: string;
 };
 
-const torrentSearchGrabs = new Map<string, TorrentSearchGrab>();
-const TORRENT_SEARCH_GRAB_TTL_MS = 60 * 60 * 1000;
+const torrentSearchGrabs = new Map<string, TorrentSearchGrab>(
+  Object.entries(readJson<Record<string, TorrentSearchGrab>>(TORRENT_SEARCH_GRABS_FILE, {}))
+);
+const TORRENT_SEARCH_GRAB_TTL_MS = 24 * 60 * 60 * 1000;
+
+function persistTorrentSearchGrabs() {
+  const values: Record<string, TorrentSearchGrab> = {};
+  for (const [token, grab] of torrentSearchGrabs) values[token] = grab;
+  writeJson(TORRENT_SEARCH_GRABS_FILE, values);
+}
 const torrentSearchCache = new Map<string, { createdAt: number; results: any[] }>();
 
 function fetchExternalBuffer(
@@ -444,14 +453,20 @@ function createTorrentSearchGrab(url: string, query?: string, guid?: string): st
     guid: guid?.trim(),
     expiresAt: Date.now() + TORRENT_SEARCH_GRAB_TTL_MS,
   });
+  persistTorrentSearchGrabs();
   return '/api/search/torrents/grab/' + token;
 }
 
 function purgeExpiredTorrentSearchGrabs() {
   const now = Date.now();
+  let changed = false;
   for (const [token, value] of torrentSearchGrabs) {
-    if (value.expiresAt <= now) torrentSearchGrabs.delete(token);
+    if (value.expiresAt <= now) {
+      torrentSearchGrabs.delete(token);
+      changed = true;
+    }
   }
+  if (changed) persistTorrentSearchGrabs();
 }
 
 async function refreshTorrentSearchGrab(grab: TorrentSearchGrab): Promise<boolean> {
@@ -494,6 +509,7 @@ async function refreshTorrentSearchGrab(grab: TorrentSearchGrab): Promise<boolea
 
     grab.url = freshUrl;
     grab.expiresAt = Date.now() + TORRENT_SEARCH_GRAB_TTL_MS;
+    persistTorrentSearchGrabs();
     console.log('[SEARCH-GRAB] refreshed expired Prowlarr release:', grab.guid || grab.query);
     return true;
   } finally {
@@ -863,9 +879,14 @@ async function main() {
 
     const token = String(req.params.token || '');
     const grab = torrentSearchGrabs.get(token);
-    if (!grab || grab.expiresAt <= Date.now()) {
+    if (!grab) {
+      return res.status(404).send('Search result download link not found. Please search again to generate a fresh link.');
+    }
+
+    if (grab.expiresAt <= Date.now()) {
       torrentSearchGrabs.delete(token);
-      return res.status(404).send('Search result download link expired');
+      persistTorrentSearchGrabs();
+      return res.status(410).send('Search result download link expired. Please search again to generate a fresh link.');
     }
 
     try {
