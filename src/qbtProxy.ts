@@ -390,6 +390,7 @@ export function installQbtProxy(app: Express) {
         form.set('urls', urls);
         if (category) form.set('category', category);
         form.set('savepath', '/downloads');
+        form.set('autoTMM', 'false');
 
         // qBittorrent 5.2.x supports filePriorities at add time. This avoids
         // starting the wrong files while metadata is being resolved.
