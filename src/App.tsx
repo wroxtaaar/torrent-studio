@@ -1234,6 +1234,9 @@ export default function App() {
           setIsAddMagnetOpen(false);
           setInitialMagnet('');
         }}
+        onOpen={() => {
+          setIsAddMagnetOpen(true);
+        }}
         onAdd={handleAddMagnet}
         defaultFolder={currentFolder === '/' ? 'Downloads' : currentFolder.replace('/', '')}
         initialMagnet={initialMagnet}
