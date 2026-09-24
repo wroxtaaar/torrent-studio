@@ -1291,6 +1291,47 @@ async function main() {
     res.json({isExternal:false,host:qbtBase,username:qbtUser,connected,version});
   });
 
+  app.get('/api/torrents/stream/:hash/:index', async (req, res) => {
+    try {
+      const hash = String(req.params.hash || '').trim();
+      const index = Number(req.params.index);
+      if (!hash || !Number.isInteger(index) || index < 0) {
+        return res.status(400).send('Invalid torrent or file index');
+      }
+
+      const list: any[] = await qbtJson('/api/v2/torrents/info?hash=' + encodeURIComponent(hash));
+      const torrent = list?.[0];
+      if (!torrent) return res.status(404).send('Torrent not found');
+
+      const files: any[] = await qbtJson('/api/v2/torrents/files?hash=' + encodeURIComponent(hash));
+      const file = files.find((item: any) => Number(item.index) === index);
+      if (!file) return res.status(404).send('Torrent file not found');
+
+      if (Number(file.priority) <= 0) return res.status(409).send('File is not selected for download');
+      if (Number(file.progress) < 0.999) return res.status(409).send('File is not complete');
+
+      const candidate = resolveQbtDownloadPath(torrent, file);
+      if (!candidate) return res.status(404).send('Downloaded file is not present on server storage');
+
+      const relative = relativeFromPhysical(candidate);
+      const id = fileId(relative);
+      const type = fileType(path.basename(candidate));
+
+      if (type !== 'video' && type !== 'audio') {
+        return res.status(415).send('This file is not streamable');
+      }
+
+      if (type === 'video') {
+        return res.redirect(302, '/api/files/hls/' + encodeURIComponent(id) + '/index.m3u8');
+      }
+
+      return res.redirect(302, '/api/files/stream/' + encodeURIComponent(id));
+    } catch (e: any) {
+      console.error('[TORRENT-STREAM]', e?.message || e);
+      return res.status(502).send(e?.message || 'Unable to stream torrent file');
+    }
+  });
+
   app.get('/api/torrents/download/:hash/:index',async(req,res)=>{
     try {
       const hash=String(req.params.hash);
