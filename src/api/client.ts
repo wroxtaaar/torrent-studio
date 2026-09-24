@@ -1,3 +1,19 @@
+export interface TorrentSearchResult {
+  guid?: string;
+  title: string;
+  size: number;
+  seeders: number;
+  leechers: number;
+  indexer?: string;
+  protocol?: string;
+  publishDate?: string;
+  infoHash?: string;
+  magnetUrl?: string;
+  downloadUrl?: string;
+  infoUrl?: string;
+  sourceUrl?: string;
+}
+
 import {
   TorrentItem,
   TorrentFileItem,
@@ -13,6 +29,29 @@ import {
 
 export const api = {
   // Torrents (qBittorrent WebAPI)
+  async searchTorrents(query: string, limit = 50): Promise<TorrentSearchResult[]> {
+    const params = new URLSearchParams({
+      q: query,
+      limit: String(Math.min(Math.max(limit, 1), 100))
+    });
+
+    const res = await fetch('/api/search/torrents?' + params.toString());
+    const body = await res.text();
+
+    let data: any = null;
+    try {
+      data = body ? JSON.parse(body) : null;
+    } catch {
+      // Keep raw response for the error below.
+    }
+
+    if (!res.ok) {
+      throw new Error(data?.error || data?.message || body || ('Torrent search failed (HTTP ' + res.status + ')'));
+    }
+
+    return Array.isArray(data?.results) ? data.results : [];
+  },
+
   async getTorrents(filter?: string): Promise<TorrentItem[]> {
     const url = filter ? `/api/v2/torrents/info?filter=${filter}` : '/api/v2/torrents/info';
     const res = await fetch(url);
