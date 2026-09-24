@@ -4,10 +4,8 @@ import {
   FileCheck,
   CheckSquare,
   Square,
-  ArrowUpCircle,
   Ban,
   Check,
-  Loader2,
   Download
 } from 'lucide-react';
 import { TorrentItem } from '../types/index.ts';
@@ -24,26 +22,14 @@ export const FilePrioModal: React.FC<FilePrioModalProps> = ({
   onClose,
   onUpdatePriority
 }) => {
-  const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]);
   const [isUpdating, setIsUpdating] = useState(false);
   const [localFiles, setLocalFiles] = useState(torrent?.files || []);
 
   useEffect(() => {
     setLocalFiles(torrent?.files || []);
-    setSelectedIndexes([]);
   }, [torrent]);
 
   if (!torrent) return null;
-
-  const checkedIndexes = localFiles
-    .filter(file => file.priority > 0)
-    .map(file => file.index);
-
-  const toggleBatchSelection = (index: number) => {
-    setSelectedIndexes(prev =>
-      prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]
-    );
-  };
 
   const applyPriority = async (targetIds: number[], priority: number) => {
     if (targetIds.length === 0 || isUpdating) return;
@@ -93,7 +79,6 @@ export const FilePrioModal: React.FC<FilePrioModalProps> = ({
   const selectAll = async (all: boolean) => {
     const ids = localFiles.map(f => f.index);
     await applyPriority(ids, all ? 1 : 0);
-    setSelectedIndexes([]);
   };
 
   const activeFiles = localFiles.filter(f => f.priority > 0);
@@ -125,73 +110,31 @@ export const FilePrioModal: React.FC<FilePrioModalProps> = ({
           </button>
         </div>
 
-        <div className="px-5 py-3 bg-slate-950/60 border-b border-slate-800 flex items-center justify-between flex-wrap gap-2 text-xs">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => void selectAll(true)}
-              disabled={isUpdating}
-              className="text-slate-400 hover:text-slate-200 disabled:opacity-40 text-xs font-medium"
-            >
-              Select All
-            </button>
-            <span className="text-slate-600">•</span>
-            <button
-              onClick={() => void selectAll(false)}
-              disabled={isUpdating}
-              className="text-slate-400 hover:text-slate-200 disabled:opacity-40 text-xs font-medium"
-            >
-              Clear
-            </button>
-            {selectedIndexes.length > 0 && (
-              <span className="text-cyan-400 font-medium ml-2">
-                ({selectedIndexes.length} highlighted)
-              </span>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              disabled={selectedIndexes.length === 0 || isUpdating}
-              onClick={() => void applyPriority(selectedIndexes, 1)}
-              className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 font-medium transition flex items-center gap-1 text-[11px]"
-            >
-              <Check className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Download</span>
-            </button>
-
-            <button
-              disabled={selectedIndexes.length === 0 || isUpdating}
-              onClick={() => void applyPriority(selectedIndexes, 7)}
-              className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 font-medium transition flex items-center gap-1 text-[11px]"
-            >
-              <ArrowUpCircle className="w-3.5 h-3.5 text-cyan-400" />
-              <span>High Prio</span>
-            </button>
-
-            <button
-              disabled={selectedIndexes.length === 0 || isUpdating}
-              onClick={() => void applyPriority(selectedIndexes, 0)}
-              className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500/20 disabled:opacity-40 text-rose-300 font-medium transition flex items-center gap-1 text-[11px]"
-            >
-              <Ban className="w-3.5 h-3.5 text-rose-400" />
-              <span>Do Not Download</span>
-            </button>
-          </div>
+        <div className="px-5 py-3 bg-slate-950/60 border-b border-slate-800 flex items-center gap-2 text-xs">
+          <button
+            onClick={() => void selectAll(true)}
+            disabled={isUpdating}
+            className="text-slate-400 hover:text-slate-200 disabled:opacity-40 text-xs font-medium"
+          >
+            Select All
+          </button>
+          <span className="text-slate-600">•</span>
+          <button
+            onClick={() => void selectAll(false)}
+            disabled={isUpdating}
+            className="text-slate-400 hover:text-slate-200 disabled:opacity-40 text-xs font-medium"
+          >
+            Clear
+          </button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
           {localFiles.map((file) => {
             const isChecked = file.priority > 0;
-            const isBatchSelected = selectedIndexes.includes(file.index);
-
             return (
               <div
                 key={file.index}
-                className={`p-3 rounded-xl border text-xs transition flex items-center justify-between gap-3 ${
-                  isBatchSelected
-                    ? 'bg-cyan-950/40 border-cyan-500/50'
-                    : 'bg-slate-850 border-slate-800 hover:border-slate-700'
-                }`}
+                className="p-3 rounded-xl border text-xs transition flex items-center justify-between gap-3 bg-slate-850 border-slate-800 hover:border-slate-700"
               >
                 <div
                   onClick={() => void toggleDownload(file.index)}
@@ -260,30 +203,6 @@ export const FilePrioModal: React.FC<FilePrioModalProps> = ({
                     )}
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => toggleBatchSelection(file.index)}
-                    className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider border ${
-                      isBatchSelected
-                        ? 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
-                        : 'bg-slate-800 text-slate-300 border-slate-700'
-                    }`}
-                    title="Select this file for a bulk priority action"
-                  >
-                    {isBatchSelected ? 'Selected' : 'Batch'}
-                  </button>
-
-                  <span
-                    className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider ${
-                      !isChecked
-                        ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                        : file.priority >= 6
-                        ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
-                        : 'bg-slate-800 text-slate-300'
-                    }`}
-                  >
-                    {!isChecked ? 'Skipped' : file.priority >= 6 ? 'High' : 'Normal'}
-                  </span>
                 </div>
               </div>
             );
