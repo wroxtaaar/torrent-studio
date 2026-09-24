@@ -113,8 +113,9 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       }
     } catch (err: any) {
       console.warn('Inspect magnet error:', err);
-      // Generate fallback files if remote network resolution timed out
-      generateFallbackFiles(link);
+      setInspectedFiles([]);
+      setInspectionSource('');
+      setError(err?.message || 'Could not resolve real torrent metadata from qBittorrent.');
     } finally {
       setIsInspecting(false);
     }
