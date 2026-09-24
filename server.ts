@@ -23,13 +23,14 @@ const defaultDownloadsDir = fs.existsSync(path.resolve(process.cwd(), 'downloads
 const DOWNLOADS_DIR = path.resolve(process.env.DOWNLOADS_DIR || defaultDownloadsDir);
 const META_DIR = path.join(STORAGE_DIR, 'meta');
 const STREAM_CACHE_DIR = path.join(STORAGE_DIR, 'stream-cache');
+const HLS_CACHE_DIR = path.join(STORAGE_DIR, 'hls-cache');
 const USERS_FILE = path.join(META_DIR, 'users.json');
 const FOLDERS_FILE = path.join(META_DIR, 'folders.json');
 const LOGS_FILE = path.join(META_DIR, 'logs.json');
 const NOTIFICATIONS_FILE = path.join(META_DIR, 'notifications.json');
 const CLEANUP_FILE = path.join(META_DIR, 'cleanup.json');
 
-for (const dir of [STORAGE_DIR, DOWNLOADS_DIR, META_DIR, STREAM_CACHE_DIR]) fs.mkdirSync(dir, { recursive: true });
+for (const dir of [STORAGE_DIR, DOWNLOADS_DIR, META_DIR, STREAM_CACHE_DIR, HLS_CACHE_DIR]) fs.mkdirSync(dir, { recursive: true });
 
 const qbtBase = (process.env.QBT_URL || process.env.QBITTORRENT_URL || 'http://qbittorrent:8080').replace(/\/$/, '');
 const qbtUser = process.env.QBT_USERNAME || process.env.QBITTORRENT_USERNAME || '';
@@ -368,6 +369,174 @@ async function prepareBrowserVideo(sourcePath: string): Promise<string> {
   }
 }
 
+const hlsJobs = new Map<string, Promise<string>>();
+
+async function runCommand(command: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', chunk => { stdout += chunk.toString(); });
+    child.stderr.on('data', chunk => {
+      stderr += chunk.toString();
+      if (stderr.length > 8000) stderr = stderr.slice(-8000);
+    });
+
+    child.on('error', reject);
+    child.on('close', code => {
+      if (code === 0) return resolve({ stdout, stderr });
+      reject(new Error(stderr.trim() || `${command} exited with code ${code}`));
+    });
+  });
+}
+
+function hlsCacheDirectory(sourcePath: string): string {
+  const stat = fs.statSync(sourcePath);
+  const key = crypto
+    .createHash('sha256')
+    .update('hls-v1')
+    .update(sourcePath)
+    .update(String(stat.size))
+    .update(String(stat.mtimeMs))
+    .digest('hex');
+  return path.join(HLS_CACHE_DIR, key);
+}
+
+async function prepareHls(sourcePath: string): Promise<string> {
+  const cacheDir = hlsCacheDirectory(sourcePath);
+  const playlist = path.join(cacheDir, 'index.m3u8');
+  const initSegment = path.join(cacheDir, 'init.mp4');
+
+  if (fs.existsSync(playlist) && fs.existsSync(initSegment)) {
+    return cacheDir;
+  }
+
+  const existing = hlsJobs.get(cacheDir);
+  if (existing) return existing;
+
+  const job = (async () => {
+    fs.mkdirSync(cacheDir, { recursive: true });
+
+    // A previous interrupted encode may have left partial output behind.
+    // Keep only the final playlist/init when they are valid; otherwise rebuild.
+    if (!fs.existsSync(playlist)) {
+      for (const name of fs.readdirSync(cacheDir)) {
+        fs.rmSync(path.join(cacheDir, name), { force: true });
+      }
+    }
+
+    let probe: any;
+    try {
+      const result = await runCommand('ffprobe', [
+        '-v', 'error',
+        '-print_format', 'json',
+        '-show_streams',
+        '-show_format',
+        sourcePath
+      ]);
+      probe = JSON.parse(result.stdout || '{}');
+    } catch (error) {
+      throw new Error('ffprobe could not analyze this media file. Make sure ffmpeg is installed on the VPS.');
+    }
+
+    const streams = Array.isArray(probe?.streams) ? probe.streams : [];
+    const video = streams.find((s: any) => s.codec_type === 'video');
+    const audio = streams.find((s: any) => s.codec_type === 'audio');
+
+    if (!video) throw new Error('No video stream was found in this file.');
+
+    const videoCopySafe =
+      String(video.codec_name || '').toLowerCase() === 'h264' &&
+      ['yuv420p', 'yuvj420p'].includes(String(video.pix_fmt || '').toLowerCase());
+
+    const audioCopySafe = !audio || String(audio.codec_name || '').toLowerCase() === 'aac';
+
+    const args = [
+      '-i', sourcePath,
+      '-map', '0:v:0',
+      ...(audio ? ['-map', '0:a:0?'] : []),
+      '-c:v', videoCopySafe ? 'copy' : 'libx264',
+      ...(videoCopySafe ? [] : [
+        '-preset', 'veryfast',
+        '-crf', '23',
+        '-pix_fmt', 'yuv420p',
+        '-profile:v', 'high',
+        '-level:v', '4.1'
+      ]),
+      ...(audio
+        ? (audioCopySafe
+          ? ['-c:a', 'copy']
+          : ['-c:a', 'aac', '-b:a', '160k', '-ar', '48000'])
+        : []),
+      '-f', 'hls',
+      '-hls_time', '6',
+      '-hls_playlist_type', 'vod',
+      '-hls_flags', 'independent_segments+temp_file',
+      '-hls_segment_type', 'fmp4',
+      '-hls_fmp4_init_filename', 'init.mp4',
+      '-hls_segment_filename', path.join(cacheDir, 'segment_%05d.m4s'),
+      playlist
+    ];
+
+    console.log(`[STREAM] Preparing HLS ${videoCopySafe ? 'stream-copy' : 'H264 transcode'} for ${sourcePath}`);
+
+    // Run FFmpeg in the background. The playlist/segments are usable while
+    // the job is progressing; this avoids waiting for a whole movie to finish.
+    const child = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...args], {
+      stdio: ['ignore', 'ignore', 'pipe']
+    });
+
+    let stderr = '';
+    child.stderr.on('data', chunk => {
+      stderr += chunk.toString();
+      if (stderr.length > 6000) stderr = stderr.slice(-6000);
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      let ready = false;
+
+      const checkReady = () => {
+        if (ready) return;
+        if (fs.existsSync(playlist) && fs.existsSync(initSegment)) {
+          ready = true;
+          resolve();
+        }
+      };
+
+      const timer = setInterval(checkReady, 200);
+      checkReady();
+
+      child.on('error', error => {
+        clearInterval(timer);
+        if (!ready) reject(error);
+      });
+
+      child.on('close', code => {
+        clearInterval(timer);
+        if (code !== 0) {
+          const message = stderr.trim() || `ffmpeg exited with code ${code}`;
+          console.error('[STREAM] HLS ffmpeg failed:', message);
+          if (!ready) reject(new Error(message));
+        }
+        if (!ready) {
+          reject(new Error('ffmpeg finished without producing a playable HLS playlist.'));
+        }
+      });
+    });
+
+    console.log(`[STREAM] HLS ready: ${cacheDir}`);
+    return cacheDir;
+  })();
+
+  hlsJobs.set(cacheDir, job);
+  try {
+    return await job;
+  } finally {
+    hlsJobs.delete(cacheDir);
+  }
+}
+
 function sendFile(req: Request, res: Response, fullPath: string, download: boolean) {
   if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) return res.status(404).send('File not found');
   const st = fs.statSync(fullPath); const size = st.size;
@@ -431,21 +600,69 @@ async function main() {
 
     log('stream','File Streamed',f.path,'info');
 
-    const ext = path.extname(fullPath).toLowerCase();
-    const needsBrowserConversion = ['.mkv', '.avi', '.flv', '.ts', '.m2ts'].includes(ext);
-
-    if (!needsBrowserConversion) {
+    // Video playback uses HLS so the browser gets real segment boundaries,
+    // accurate seeking and normal VOD behavior. Audio can use the direct
+    // range streamer.
+    if (f.type !== 'video') {
       return sendFile(req,res,fullPath,false);
     }
 
     try {
-      // Build/cache a real seekable MP4. The browser can then use normal
-      // HTTP Range requests, so duration and forward/backward seeking work.
-      const browserVideo = await prepareBrowserVideo(fullPath);
-      return sendFile(req,res,browserVideo,false);
-    } catch (error) {
-      console.error('[STREAM] Failed to prepare browser video:', error);
-      return res.status(500).send('Unable to prepare this video for browser streaming.');
+      const cacheDir = await prepareHls(fullPath);
+      const playlistPath = path.join(cacheDir, 'index.m3u8');
+      let playlist = fs.readFileSync(playlistPath, 'utf8');
+
+      // Rewrite relative HLS assets to our authenticated/same-origin route.
+      playlist = playlist
+        .split(/\r?\n/)
+        .map(line => {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#')) return line;
+          return `/api/files/hls/${encodeURIComponent(f.id)}/${encodeURIComponent(path.basename(trimmed))}`;
+        })
+        .join('\n');
+
+      res.setHeader('Content-Type','application/vnd.apple.mpegurl');
+      res.setHeader('Cache-Control','no-cache');
+      res.setHeader('Access-Control-Allow-Origin','*');
+      return res.send(playlist);
+    } catch (error: any) {
+      console.error('[STREAM] HLS preparation failed:', error);
+      return res.status(500).send(error?.message || 'Unable to prepare this video for streaming.');
+    }
+  });
+
+  app.get('/api/files/hls/:id/:asset', (req,res)=>{
+    const f = scanFiles().find(x=>x.id===req.params.id);
+    if (!f || f.type !== 'video') return res.status(404).send('Video not found');
+
+    const asset = String(req.params.asset || '');
+    if (!/^(index\.m3u8|init\.mp4|segment_\d{5}\.m4s)$/.test(asset)) {
+      return res.status(400).send('Invalid HLS asset');
+    }
+
+    const fullPath = physicalFromRelative(f.path.slice(1));
+    if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) {
+      return res.status(404).send('Video not found');
+    }
+
+    try {
+      const cacheDir = hlsCacheDirectory(fullPath);
+      const assetPath = path.join(cacheDir, asset);
+      if (!fs.existsSync(assetPath) || !fs.statSync(assetPath).isFile()) {
+        return res.status(404).send('HLS segment not ready');
+      }
+
+      if (asset.endsWith('.m3u8')) res.type('application/vnd.apple.mpegurl');
+      else if (asset.endsWith('.mp4')) res.type('video/mp4');
+      else res.type('video/mp4');
+
+      res.setHeader('Cache-Control','no-cache');
+      res.setHeader('Access-Control-Allow-Origin','*');
+      return res.sendFile(assetPath);
+    } catch (error: any) {
+      console.error('[STREAM] HLS asset failed:', error);
+      return res.status(500).send('Failed to serve HLS media.');
     }
   });
 
