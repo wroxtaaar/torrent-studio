@@ -80,9 +80,33 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     }
   }, [isOpen]);
 
-  // Inspect magnet link metadata via server
+  const classifyFileType = (name: string): InspectFileItem['type'] => {
+    const lower = String(name || '').toLowerCase();
+    if (/\.(mp4|mkv|m4v|webm|mov|avi|wmv|flv|ts|m2ts)$/.test(lower)) return 'video';
+    if (/\.(mp3|wav|flac|aac|ogg|m4a|opus|wma)$/.test(lower)) return 'audio';
+    if (/\.(zip|rar|7z|tar|gz|bz2|xz|iso)$/.test(lower)) return 'archive';
+    if (/\.(pdf|txt|md|json|csv|srt|vtt|ass|sub)$/.test(lower)) return 'document';
+    return 'other';
+  };
+
+  const applyFileList = (files: { index: number; name: string; size: number; path?: string; type?: string }[]) => {
+    setInspectedFiles(
+      files.map((f) => ({
+        index: Number(f.index),
+        name: f.name,
+        size: Number(f.size || 0),
+        type: (f.type as InspectFileItem['type']) || classifyFileType(f.name),
+        selected: false
+      }))
+    );
+    setCustomFileCount(files.length);
+  };
+
+  // Add the torrent paused first, then poll qBittorrent's real file list.
+  // This avoids relying on fetchMetadata returning a complete descriptor.
   const triggerInspect = async (link: string) => {
-    if (!link.trim()) {
+    const source = link.trim();
+    if (!source) {
       setInspectedFiles([]);
       setInspectionSource('');
       return;
@@ -91,36 +115,65 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     try {
       setIsInspecting(true);
       setError('');
-      const data = await api.inspectMagnet(link.trim());
-      if (!data || !Array.isArray(data.files) || data.files.length === 0) {
+      setInspectedFiles([]);
+      setInspectionSource('Adding torrent paused and waiting for qBittorrent metadata...');
+
+      const data = await api.inspectMagnet(source, category);
+
+      if (data && Array.isArray(data.files) && data.files.length > 0) {
+        applyFileList(data.files);
+        setInspectionSource('✓ qBittorrent file metadata loaded • Torrent remains paused until you select files');
+        return;
+      }
+
+      const hash = String(data?.hash || '').trim().toLowerCase();
+      if (!hash) {
         throw new Error(
           data?.message ||
-          'qBittorrent is still resolving this torrent. Please try Load File List again in a few seconds.'
+          'qBittorrent did not return a torrent hash. Please verify the magnet URI and try again.'
         );
       }
 
-      setInspectedFiles(
-        data.files.map((f) => ({
-          index: f.index,
-          name: f.name,
-          size: f.size,
-          type: (f.type as any) || 'other',
-          selected: false
-        }))
-      );
-      setCustomFileCount(data.files.length);
-      if (data.source === 'itorrents_cache') {
-        setInspectionSource('✓ Verified File Manifest (Real BitTorrent Metadata)');
-      } else if (data.source === 'apibay_metadata') {
-        setInspectionSource('✓ Verified File Manifest (Public Metadata Index)');
-      } else {
-        setInspectionSource('Active Metadata Breakdown');
+      if (!data?.pending && data?.source !== 'qbt_torrent_pending') {
+        throw new Error(data?.message || 'qBittorrent did not return the torrent file list.');
       }
+
+      const maxAttempts = 120;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const files = await api.getTorrentFiles(hash);
+          if (files.length > 0) {
+            applyFileList(
+              files.map((f) => ({
+                index: f.index,
+                name: f.name,
+                size: f.size,
+                path: f.path,
+                type: classifyFileType(f.name)
+              }))
+            );
+            setInspectionSource('✓ qBittorrent file metadata loaded • Torrent is paused');
+            return;
+          }
+        } catch {
+          // Metadata may not be available yet; keep polling.
+        }
+
+        const seconds = attempt * 2;
+        setInspectionSource(
+          `qBittorrent is resolving metadata... (${seconds}s) • Torrent is safely paused`
+        );
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+
+      throw new Error(
+        'qBittorrent has not returned the file list yet. The torrent remains paused. Click Load File List to retry.'
+      );
     } catch (err: any) {
       console.warn('Inspect magnet error:', err);
       setInspectedFiles([]);
       setInspectionSource('');
-      setError(err?.message || 'Could not resolve real torrent metadata from qBittorrent.');
+      setError(err?.message || 'Could not load torrent metadata from qBittorrent.');
     } finally {
       setIsInspecting(false);
     }
@@ -129,10 +182,9 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
   const handleInputChange = (val: string) => {
     setMagnetInput(val);
     setError('');
+    setInspectedFiles([]);
+    setInspectionSource('');
     if (inspectTimeoutRef.current) clearTimeout(inspectTimeoutRef.current);
-    inspectTimeoutRef.current = setTimeout(() => {
-      triggerInspect(val);
-    }, 400);
   };
 
   // Handle direct .torrent file upload
