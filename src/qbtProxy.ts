@@ -622,11 +622,10 @@ export function installQbtProxy(app: Express) {
         // engine, while guaranteeing nothing starts before the user selects files.
         let hash = sourceHash;
         if (hash && await torrentExists(hash)) {
-          await qbtJson('/api/v2/torrents/stop', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ hashes: hash }),
-          });
+          // This torrent already exists. Do not stop or reset an active
+          // download just because the user opened it from Search again.
+          // Newly-added torrents are handled by addTorrentForMetadata and
+          // remain paused until the user confirms file selection.
         } else {
           const hashes = await addTorrentForMetadata(source, category);
           hash = hashes[0];
@@ -742,12 +741,10 @@ export function installQbtProxy(app: Express) {
 
         const reuseHash = existingHash || rememberedHash || sourceHash;
         if (reuseHash && await torrentExists(reuseHash)) {
+          // Reuse the existing torrent in place. Changing file priorities and
+          // calling start below is enough; stopping it here causes an
+          // unnecessary pause/stall when the user re-adds the same result.
           hashes = [reuseHash];
-          await qbtJson('/api/v2/torrents/stop', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ hashes: reuseHash }),
-          });
         } else {
           hashes = await addTorrentForMetadata(urls, category);
         }
