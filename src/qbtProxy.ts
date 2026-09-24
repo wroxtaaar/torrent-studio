@@ -16,6 +16,9 @@ const config: QbtConfig = {
   apiKey: process.env.QBT_API_KEY || process.env.QBITTORRENT_API_KEY,
 };
 
+// Same-container address used to resolve relative Search -> Add links.
+const internalServerBase = (process.env.TORRENT_SEARCH_GRAB_INTERNAL_BASE_URL || 'http://127.0.0.1:3000').replace(/\/$/, '');
+
 let qbtSessionCookie = '';
 let qbtLoginPromise: Promise<void> | null = null;
 
