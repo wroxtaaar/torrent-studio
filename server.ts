@@ -458,7 +458,7 @@ function hlsCacheDirectory(sourcePath: string): string {
   const stat = fs.statSync(sourcePath);
   const key = crypto
     .createHash('sha256')
-    .update('hls-v1')
+    .update('hls-v2')
     .update(sourcePath)
     .update(String(stat.size))
     .update(String(stat.mtimeMs))
@@ -472,7 +472,14 @@ async function prepareHls(sourcePath: string): Promise<string> {
   const initSegment = path.join(cacheDir, 'init.mp4');
 
   if (fs.existsSync(playlist) && fs.existsSync(initSegment)) {
-    return cacheDir;
+    try {
+      const existingPlaylist = fs.readFileSync(playlist, 'utf8');
+      if (existingPlaylist.includes('#EXT-X-ENDLIST')) {
+        return cacheDir;
+      }
+    } catch {
+      // Rebuild an incomplete/corrupt cache.
+    }
   }
 
   const existing = hlsJobs.get(cacheDir);
@@ -534,7 +541,7 @@ async function prepareHls(sourcePath: string): Promise<string> {
         : []),
       '-f', 'hls',
       '-hls_time', '6',
-      '-hls_playlist_type', 'event',
+      '-hls_playlist_type', 'vod',
       '-hls_flags', 'independent_segments+temp_file',
       '-hls_segment_type', 'fmp4',
       '-hls_fmp4_init_filename', 'init.mp4',
@@ -544,8 +551,11 @@ async function prepareHls(sourcePath: string): Promise<string> {
 
     console.log(`[STREAM] Preparing HLS ${videoCopySafe ? 'stream-copy' : 'H264 transcode'} for ${sourcePath}`);
 
-    // Run FFmpeg in the background. The playlist/segments are usable while
-    // the job is progressing; this avoids waiting for a whole movie to finish.
+    // Produce a complete VOD playlist before returning it to the browser.
+    // The previous event-playlist implementation returned a snapshot too early,
+    // so the browser could see only the first few minutes and never receive the
+    // later playlist entries. VOD + EXT-X-ENDLIST gives hls.js the full duration
+    // and a stable seekable timeline.
     const child = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...args], {
       stdio: ['ignore', 'ignore', 'pipe']
     });
@@ -557,42 +567,33 @@ async function prepareHls(sourcePath: string): Promise<string> {
     });
 
     await new Promise<void>((resolve, reject) => {
-      let ready = false;
-
-      const checkReady = () => {
-        if (ready) return;
-        if (
-          fs.existsSync(playlist) &&
-          fs.existsSync(initSegment) &&
-          fs.existsSync(path.join(cacheDir, 'segment_00000.m4s'))
-        ) {
-          ready = true;
-          resolve();
-        }
-      };
-
-      const timer = setInterval(checkReady, 200);
-      checkReady();
-
-      child.on('error', error => {
-        clearInterval(timer);
-        if (!ready) reject(error);
-      });
-
+      child.on('error', reject);
       child.on('close', code => {
-        clearInterval(timer);
         if (code !== 0) {
           const message = stderr.trim() || `ffmpeg exited with code ${code}`;
           console.error('[STREAM] HLS ffmpeg failed:', message);
-          if (!ready) reject(new Error(message));
+          reject(new Error(message));
+          return;
         }
-        if (!ready) {
-          reject(new Error('ffmpeg finished without producing a playable HLS playlist.'));
+
+        try {
+          const generatedPlaylist = fs.readFileSync(playlist, 'utf8');
+          if (
+            !fs.existsSync(initSegment) ||
+            !fs.existsSync(path.join(cacheDir, 'segment_00000.m4s')) ||
+            !generatedPlaylist.includes('#EXT-X-ENDLIST')
+          ) {
+            reject(new Error('ffmpeg finished without producing a complete HLS VOD playlist.'));
+            return;
+          }
+          resolve();
+        } catch (error) {
+          reject(error);
         }
       });
     });
 
-    console.log(`[STREAM] HLS ready: ${cacheDir}`);
+    console.log(`[STREAM] HLS VOD ready: ${cacheDir}`);
     return cacheDir;
   })();
 
