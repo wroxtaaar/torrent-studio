@@ -327,9 +327,15 @@ export function installQbtProxy(app: Express) {
         form.set('urls', urls);
         if (category) form.set('category', category);
 
-        // If selection was supplied, pause first. Once qBittorrent has metadata,
-        // set the real file priorities and then resume.
-        if (selectedFiles && manifest?.length) form.set('paused', 'true');
+        // qBittorrent 5.2.x supports filePriorities at add time. This avoids
+        // starting the wrong files while metadata is being resolved.
+        if (selectedFiles && manifest?.length) {
+          const selectedSet = new Set(selectedFiles);
+          const priorities = manifest.map((_item: any, index: number) =>
+            selectedSet.has(index) ? '1' : '0'
+          );
+          form.set('filePriorities', priorities.join(','));
+        }
 
         const upstream = await qbtJson('/api/v2/torrents/add', {
           method: 'POST',
@@ -338,43 +344,6 @@ export function installQbtProxy(app: Express) {
         });
 
         console.log('[QBT-PROXY] add response:', upstream);
-
-        if (selectedFiles && manifest?.length) {
-          const hash = (urls.match(/urn:btih:([a-zA-Z0-9]+)/i)?.[1] || '').toLowerCase();
-          if (hash) {
-            const torrent = await waitForTorrent(hash);
-            if (torrent) {
-              try {
-                const fileList = await getFiles(hash);
-                const selectedSet = new Set(selectedFiles);
-                const excluded = fileList.map((f: any) => f.index).filter((i: number) => !selectedSet.has(i));
-                if (excluded.length) {
-                  await qbtJson('/api/v2/torrents/filePrio', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: new URLSearchParams({ hash, id: excluded.join('|'), priority: '0' }),
-                  });
-                }
-                const included = fileList.map((f: any) => f.index).filter((i: number) => selectedSet.has(i));
-                if (included.length) {
-                  await qbtJson('/api/v2/torrents/filePrio', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: new URLSearchParams({ hash, id: included.join('|'), priority: '1' }),
-                  });
-                }
-                await qbtJson('/api/v2/torrents/resume', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                  body: new URLSearchParams({ hashes: hash }),
-                });
-              } catch (priorityError) {
-                console.error('[QBT-PROXY] selective priority failed:', priorityError);
-              }
-            }
-          }
-        }
-
         return res.send(typeof upstream === 'string' ? upstream : 'Ok.');
       }
 
