@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import { Readable } from 'stream';
+import { installQbtProxy } from './src/qbtProxy.ts';
 
 const require = createRequire(import.meta.url);
 import { ZipArchive } from 'archiver';
@@ -27,7 +28,7 @@ const __dirname = path.dirname(__filename);
 
 // The dev server inside AI Studio container MUST listen strictly on port 3000
 // (Nginx listens on port 8080 and proxies to localhost:3000)
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 10000;
 const STORAGE_DIR = path.resolve(__dirname, 'storage');
 const DOWNLOADS_DIR = path.resolve(STORAGE_DIR, 'downloads');
 const TEMP_DIR = path.resolve(STORAGE_DIR, 'temp');
@@ -602,6 +603,9 @@ async function startServer() {
     res.setHeader('X-Powered-By', 'SeedFlow-qBittorrent-Orchestrator');
     next();
   });
+
+  // Real qBittorrent backend proxy. Unknown routes fall through to legacy UI APIs.
+  installQbtProxy(app);
 
   // --------------------------------------------------------------------------
   // 1. qBittorrent WebAPI v2 Specification Implementation
