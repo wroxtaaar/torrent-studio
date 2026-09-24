@@ -902,6 +902,12 @@ async function main() {
             'User-Agent': 'Torrent-Studio/1.0',
           });
 
+          if (/^magnet:\?/i.test(grab.url)) {
+            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+            res.setHeader('Cache-Control', 'no-store');
+            return res.status(200).send(grab.url);
+          }
+
           if (retry.status >= 200 && retry.status < 300) {
             if (!retry.data.length) return res.status(502).send('Prowlarr returned an empty torrent response after refresh');
             const contentTypeRetry = Array.isArray(retry.headers['content-type'])
@@ -966,7 +972,7 @@ async function main() {
 
       const cacheKey = query.toLowerCase() + '|' + Math.min(Math.max(limit, 1), 100) + '|' + Math.max(offset, 0);
       const cached = torrentSearchCache.get(cacheKey);
-      if (cached && Date.now() - cached.createdAt < 2 * 60 * 1000) {
+      if (cached && Date.now() - cached.createdAt < 10 * 60 * 1000) {
         return res.json({ results: cached.results, cached: true });
       }
 
