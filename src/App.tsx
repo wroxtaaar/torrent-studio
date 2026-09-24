@@ -1125,8 +1125,6 @@ export default function App() {
                   : <Moon className="w-4 h-4 text-cyan-400" />}
                 Theme: {theme}
               </button>
-
-              )}
             </div>
           </div>
         </>
@@ -1134,7 +1132,7 @@ export default function App() {
 
       {/* Mobile Bottom Navigation */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-slate-950/95 backdrop-blur-xl border-t border-slate-800 px-1 pb-[calc(env(safe-area-inset-bottom)+4px)] pt-1.5">
-        <div className="grid grid-cols-5 items-center">
+        <div className="grid grid-cols-4 items-center">
           <button
             onClick={() => { setActiveTab('search'); setIsMobileMoreOpen(false); }}
             className={`flex flex-col items-center justify-center gap-0.5 min-h-12 px-1 rounded-xl transition ${activeTab === 'search' ? 'text-cyan-400' : 'text-slate-400'}`}
