@@ -12,6 +12,7 @@ import {
   Zap
 } from 'lucide-react';
 import { QbtSettings } from '../types/index.ts';
+import { api } from '../api/client.ts';
 
 interface QbtSettingsModalProps {
   isOpen: boolean;
@@ -35,13 +36,18 @@ export const QbtSettingsModal: React.FC<QbtSettingsModalProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [testSuccess, setTestSuccess] = useState(false);
 
-  const handleTestConnection = () => {
+  const handleTestConnection = async () => {
     setIsSaving(true);
-    setTimeout(() => {
+    setTestSuccess(false);
+    try {
+      const current = await api.getQbtSettings();
+      setTestSuccess(Boolean(current.connected));
+    } catch (e) {
+      setTestSuccess(false);
+      console.error('qBittorrent connection test failed:', e);
+    } finally {
       setIsSaving(false);
-      setTestSuccess(true);
-      setTimeout(() => setTestSuccess(false), 3000);
-    }, 600);
+    }
   };
 
   const handleSave = async () => {
@@ -92,10 +98,10 @@ export const QbtSettingsModal: React.FC<QbtSettingsModalProps> = ({
               <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
               <div>
                 <p className="text-xs font-bold text-slate-200">
-                  {isExternal ? 'External qBittorrent Mode' : 'Integrated Native WebAPI v2 Engine'}
+                  {isExternal ? 'External qBittorrent Mode' : 'Integrated VPS qBittorrent'}
                 </p>
                 <p className="text-[11px] text-slate-400 font-mono">
-                  {settings.version} • Status: Connected
+                  {settings.version || 'Unknown version'} • Status: {settings.connected ? 'Connected' : 'Disconnected'}
                 </p>
               </div>
             </div>
