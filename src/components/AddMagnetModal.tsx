@@ -12,7 +12,8 @@ import {
   Square,
   AlertCircle,
   HelpCircle,
-  UploadCloud,
+  Copy,
+  FileDown,
   Loader2,
   Sliders,
   Check,
@@ -70,8 +71,8 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
   const [inspectedHash, setInspectedHash] = useState('');
   const [backgroundMode, setBackgroundMode] = useState(false);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const inspectTimeoutRef = useRef<any>(null);
+  const [copiedMagnet, setCopiedMagnet] = useState(false);
 
   // Reset or initialize modal state
   useEffect(() => {
@@ -98,13 +99,14 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
   };
 
   const applyFileList = (files: { index: number; name: string; size: number; path?: string; type?: string; priority?: number }[]) => {
+    const singleFile = files.length === 1;
     setInspectedFiles(
       files.map((f) => ({
         index: Number(f.index),
         name: f.name,
         size: Number(f.size || 0),
         type: (f.type as InspectFileItem['type']) || classifyFileType(f.name),
-        selected: Number(f.priority ?? 0) > 0
+        selected: singleFile ? true : Number(f.priority ?? 0) > 0
       }))
     );
     setCustomFileCount(files.length);
@@ -212,37 +214,6 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     if (inspectTimeoutRef.current) clearTimeout(inspectTimeoutRef.current);
   };
 
-  // Handle direct .torrent file upload
-  const handleTorrentFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    try {
-      setIsInspecting(true);
-      setBackgroundMode(true);
-      setError('');
-      const data = await api.uploadTorrentFile(file);
-      setMagnetInput(data.magnetUri);
-      setInspectedHash(String(data.hash || '').trim().toLowerCase());
-      setInspectedFiles(
-        data.files.map((f) => ({
-          index: f.index,
-          name: f.name,
-          size: f.size,
-          type: (f.type as any) || 'other',
-          selected: false
-        }))
-      );
-      setCustomFileCount(data.files.length);
-      setInspectionSource(`✓ Loaded from .torrent file (${data.files.length} exact files)`);
-    } catch (err: any) {
-      setError(err.message || 'Failed to read .torrent file');
-    } finally {
-      setIsInspecting(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  };
-
   const toggleFile = (index: number) => {
     setInspectedFiles(prev =>
       prev.map(f => (f.index === index ? { ...f, selected: !f.selected } : f))
@@ -269,6 +240,79 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
   const selectedCount = selectedFiles.length;
   const totalSelectedSize = selectedFiles.reduce((acc, f) => acc + f.size, 0);
   const totalTorrentSize = inspectedFiles.reduce((acc, f) => acc + f.size, 0);
+
+  const isSingleFile = inspectedFiles.length === 1;
+  const isSearchGrab = /^\/api\/search\/torrents\/grab\//i.test(magnetInput.trim());
+
+  const resolveMagnetUri = async (): Promise<string> => {
+    const source = magnetInput.trim();
+
+    if (/^magnet:\?/i.test(source)) return source;
+    if (/^[a-f0-9]{40}$/i.test(source)) {
+      const name = inspectedFiles[0]?.name?.split('/').pop() || 'torrent';
+      return `magnet:?xt=urn:btih:${source.toLowerCase()}&dn=${encodeURIComponent(name)}`;
+    }
+
+    if (source.startsWith('/api/') || /^https?:\/\//i.test(source)) {
+      const response = await fetch(source);
+      const text = (await response.text()).trim();
+      if (/^magnet:\?/i.test(text)) return text;
+    }
+
+    if (inspectedHash) {
+      const name = inspectedFiles[0]?.name?.split('/').pop() || 'torrent';
+      return `magnet:?xt=urn:btih:${inspectedHash}&dn=${encodeURIComponent(name)}`;
+    }
+
+    throw new Error('A magnet link is not available for this torrent.');
+  };
+
+  const handleCopyMagnet = async () => {
+    try {
+      const magnet = await resolveMagnetUri();
+
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(magnet);
+      } else {
+        const area = document.createElement('textarea');
+        area.value = magnet;
+        area.style.position = 'fixed';
+        area.style.opacity = '0';
+        document.body.appendChild(area);
+        area.focus();
+        area.select();
+        document.execCommand('copy');
+        area.remove();
+      }
+
+      setCopiedMagnet(true);
+      window.setTimeout(() => setCopiedMagnet(false), 1600);
+    } catch (err: any) {
+      setError(err?.message || 'Could not copy the magnet link.');
+    }
+  };
+
+  const handleDownloadTorrent = async () => {
+    if (!inspectedHash) {
+      setError('The torrent hash is not available yet.');
+      return;
+    }
+
+    try {
+      const blob = await api.exportTorrent(inspectedHash);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      const baseName = inspectedFiles[0]?.name?.split('/').pop() || 'torrent';
+      anchor.href = url;
+      anchor.download = baseName.replace(/\.[^.]+$/, '') + '.torrent';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setError(err?.message || 'Could not download the .torrent file.');
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -428,49 +472,81 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
             </div>
           )}
 
-          {/* Magnet link input & .torrent upload */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-xs font-semibold text-slate-300">
-                Magnet URI / Torrent Hash
-              </label>
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".torrent"
-                  onChange={handleTorrentFileUpload}
-                  className="hidden"
-                />
+          {/* Torrent source */}
+          {isSearchGrab ? (
+            <div className="rounded-xl bg-slate-950/80 border border-slate-800 p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <Link2 className="w-4 h-4 text-cyan-400" />
+                <span className="text-xs font-semibold text-slate-200">Torrent Link</span>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2">
                 <button
                   type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-400 hover:text-cyan-300 border border-slate-700 text-[11px] font-medium flex items-center gap-1.5 transition"
+                  onClick={() => void handleCopyMagnet()}
+                  className="flex-1 px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-cyan-400 text-xs font-semibold transition flex items-center justify-center gap-2"
                 >
-                  <UploadCloud className="w-3.5 h-3.5" />
-                  <span>Upload .torrent</span>
+                  {copiedMagnet ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  {copiedMagnet ? 'Magnet Copied' : 'Copy Magnet Link'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDownloadTorrent()}
+                  disabled={!inspectedHash}
+                  className="flex-1 px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold transition flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <FileDown className="w-4 h-4" />
+                  Download .torrent
                 </button>
               </div>
             </div>
-
-            <div className="relative">
+          ) : (
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                Magnet URI / Torrent Hash
+              </label>
               <textarea
                 rows={2}
                 value={magnetInput}
                 onChange={(e) => handleInputChange(e.target.value)}
                 placeholder="Paste magnet:?xt=urn:btih:... or torrent hash"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 placeholder-slate-500 text-xs font-mono focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition resize-none pr-10"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 placeholder-slate-500 text-xs font-mono focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition resize-none"
               />
               {isInspecting && (
-                <div className="absolute right-3 top-3 text-cyan-400 flex items-center gap-1.5 text-xs font-medium animate-pulse">
+                <div className="mt-2 text-cyan-400 flex items-center gap-1.5 text-xs font-medium animate-pulse">
                   <Loader2 className="w-4 h-4 animate-spin" />
                   <span className="text-[11px]">Resolving...</span>
                 </div>
               )}
             </div>
-          </div>
+          )}
 
-          {/* Selective File Download Selection Checklist */}
+          {/* File details / selective file selection */}
+          {inspectedFiles.length > 0 && (
+            isSingleFile ? (
+              <div className="rounded-xl bg-slate-950/90 border border-slate-800/90 p-3.5 shadow-inner">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 rounded-lg bg-cyan-500/10 border border-cyan-500/20 shrink-0">
+                    {inspectedFiles[0].type === 'video' && <Film className="w-5 h-5 text-indigo-400" />}
+                    {inspectedFiles[0].type === 'audio' && <Music className="w-5 h-5 text-cyan-400" />}
+                    {inspectedFiles[0].type === 'document' && <FileText className="w-5 h-5 text-emerald-400" />}
+                    {inspectedFiles[0].type === 'archive' && <FileArchive className="w-5 h-5 text-amber-400" />}
+                    {inspectedFiles[0].type === 'other' && <HelpCircle className="w-5 h-5 text-slate-400" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[11px] font-semibold text-cyan-400 mb-1">Torrent file</div>
+                    <div className="text-sm font-semibold text-slate-100 break-words">
+                      {inspectedFiles[0].name}
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400 font-mono">
+                      <span>{formatBytes(inspectedFiles[0].size)}</span>
+                      <span className="text-slate-600">•</span>
+                      <span>{inspectedFiles[0].type}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
           {inspectedFiles.length > 0 && (
             <div className="rounded-xl bg-slate-950/90 border border-slate-800/90 overflow-hidden shadow-inner">
               {/* Header with question and bulk controls */}
@@ -585,18 +661,23 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
               </div>
             </div>
           )}
+              </>
+            )
+          )}
 
         </form>
 
         {/* Modal Footer */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 px-3 sm:px-5 py-3 border-t border-slate-800 bg-slate-900/95">
           <div className="text-[11px] sm:text-xs text-slate-400 w-full sm:w-auto">
-            {selectedCount > 0 ? (
+            {isSingleFile && inspectedFiles.length > 0 ? (
+              <span>Ready to download</span>
+            ) : selectedCount > 0 ? (
               <span>Downloading <strong className="text-cyan-400">{selectedCount}</strong> file(s) ({formatBytes(totalSelectedSize)}) • {inspectedFiles.length - selectedCount} skipped</span>
             ) : inspectedFiles.length > 0 ? (
               <span className="text-rose-400">No files selected</span>
             ) : (
-              <span>Paste a magnet link or upload a .torrent to load the file list first</span>
+              <span>Paste a magnet link or torrent hash to load the file list</span>
             )}
           </div>
 
@@ -634,6 +715,8 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
               <span>
                 {isLoading
                   ? 'Adding Task...'
+                  : isSingleFile && selectedCount > 0
+                  ? 'Download File'
                   : selectedCount > 0
                   ? `Download ${selectedCount} Selected File(s)`
                   : isInspecting
