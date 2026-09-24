@@ -9,6 +9,8 @@ services:
       NODE_ENV: production
       PORT: 3000
       QBT_URL: http://qbittorrent:8080
+      PROWLARR_URL: http://prowlarr:9696
+      PROWLARR_API_KEY: ${PROWLARR_API_KEY:-}
     ports:
       - "3000:3000"
     volumes:
@@ -16,6 +18,23 @@ services:
     depends_on:
       qbittorrent:
         condition: service_started
+    networks:
+      - torrent
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: torrent-prowlarr
+    restart: unless-stopped
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Asia/Kolkata
+    volumes:
+      - ./prowlarr-config:/config
+    expose:
+      - "9696"
+    ports:
+      - "127.0.0.1:9696:9696"
     networks:
       - torrent
 
