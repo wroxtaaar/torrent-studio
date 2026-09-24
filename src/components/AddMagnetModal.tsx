@@ -484,12 +484,13 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
                   void handleSubmit({ preventDefault: () => {} } as React.FormEvent);
                 } else if (magnetInput.trim() && !isInspecting) {
                   void triggerInspect(magnetInput.trim());
+                } else if (!magnetInput.trim()) {
+                  setError('Paste a magnet link, torrent hash, or upload a .torrent file first.');
                 }
               }}
               disabled={
                 isLoading ||
                 isInspecting ||
-                !magnetInput.trim() ||
                 (inspectedFiles.length > 0 && selectedCount === 0)
               }
               className="px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 text-xs font-bold transition flex items-center gap-2 shadow-lg shadow-cyan-500/20"
