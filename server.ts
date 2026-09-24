@@ -498,7 +498,11 @@ async function prepareHls(sourcePath: string): Promise<string> {
 
       const checkReady = () => {
         if (ready) return;
-        if (fs.existsSync(playlist) && fs.existsSync(initSegment)) {
+        if (
+          fs.existsSync(playlist) &&
+          fs.existsSync(initSegment) &&
+          fs.existsSync(path.join(cacheDir, 'segment_00000.m4s'))
+        ) {
           ready = true;
           resolve();
         }
@@ -613,12 +617,26 @@ async function main() {
       let playlist = fs.readFileSync(playlistPath, 'utf8');
 
       // Rewrite relative HLS assets to our authenticated/same-origin route.
+      const hlsAssetUrl = (asset: string) =>
+        `/api/files/hls/${encodeURIComponent(f.id)}/${encodeURIComponent(path.basename(asset))}`;
+
       playlist = playlist
         .split(/\r?\n/)
         .map(line => {
           const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith('#')) return line;
-          return `/api/files/hls/${encodeURIComponent(f.id)}/${encodeURIComponent(path.basename(trimmed))}`;
+          if (!trimmed) return line;
+
+          // fMP4 playlists carry the init segment inside EXT-X-MAP as an
+          // URI attribute rather than as a standalone playlist line.
+          if (trimmed.startsWith('#EXT-X-MAP:') && trimmed.includes('URI="')) {
+            return line.replace(
+              /URI="([^"]+)"/,
+              (_match, asset) => `URI="${hlsAssetUrl(String(asset))}"`
+            );
+          }
+
+          if (trimmed.startsWith('#')) return line;
+          return hlsAssetUrl(trimmed);
         })
         .join('\n');
 
