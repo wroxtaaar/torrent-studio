@@ -8,7 +8,6 @@ import {
   FileArchive,
   FileText,
   FolderDown,
-  Sparkles,
   CheckSquare,
   Square,
   AlertCircle,
@@ -28,6 +27,7 @@ import { formatBytes } from '../utils/formatters.ts';
 interface AddMagnetModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpen: () => void;
   onAdd: (
     magnet: string,
     category: string,
@@ -52,6 +52,7 @@ interface InspectFileItem {
 export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
   isOpen,
   onClose,
+  onOpen,
   onAdd,
   defaultFolder = 'Downloads',
   initialMagnet = ''
@@ -67,6 +68,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
   const [customFileCount, setCustomFileCount] = useState<number>(16);
   const [pasteManifestText, setPasteManifestText] = useState('');
   const [inspectedHash, setInspectedHash] = useState('');
+  const [backgroundMode, setBackgroundMode] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inspectTimeoutRef = useRef<any>(null);
@@ -74,6 +76,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
   // Reset or initialize modal state
   useEffect(() => {
     if (isOpen) {
+      setBackgroundMode(false);
       setError('');
       setShowManifestEditor(false);
       setPasteManifestText('');
@@ -119,6 +122,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
 
     try {
       setIsInspecting(true);
+      setBackgroundMode(true);
       setError('');
       setInspectedFiles([]);
       setInspectionSource('Adding torrent paused and waiting for qBittorrent metadata...');
@@ -199,6 +203,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
   }, [isOpen, initialMagnet]);
 
   const handleInputChange = (val: string) => {
+    setBackgroundMode(false);
     setMagnetInput(val);
     setError('');
     setInspectedFiles([]);
@@ -214,6 +219,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
 
     try {
       setIsInspecting(true);
+      setBackgroundMode(true);
       setError('');
       const data = await api.uploadTorrentFile(file);
       setMagnetInput(data.magnetUri);
@@ -297,6 +303,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       setIsLoading(true);
       setError('');
       await onAdd(magnetInput.trim(), category, selectedFileIndexes, manifest, inspectedHash || undefined);
+      setBackgroundMode(false);
       onClose();
     } catch (err: any) {
       setError(err.message || 'Failed to start cloud torrent download');
@@ -305,7 +312,85 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     }
   };
 
-  if (!isOpen) return null;
+  if (!isOpen && !backgroundMode) return null;
+
+  if (backgroundMode) {
+    const ready = !isInspecting && inspectedFiles.length > 0;
+    const failed = !isInspecting && Boolean(error);
+
+    return (
+      <div className="fixed right-3 bottom-[5.75rem] md:bottom-6 z-50 w-[min(92vw,24rem)]">
+        <div className="rounded-2xl bg-slate-900/95 backdrop-blur-xl border border-slate-700 shadow-2xl p-3.5">
+          <div className="flex items-start gap-3">
+            <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 shrink-0">
+              {isInspecting ? (
+                <Loader2 className="w-5 h-5 text-cyan-400 animate-spin" />
+              ) : ready ? (
+                <FileCheck className="w-5 h-5 text-emerald-400" />
+              ) : (
+                <AlertCircle className="w-5 h-5 text-rose-400" />
+              )}
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold text-slate-100 truncate">
+                {isInspecting ? 'Resolving torrent in background' : ready ? 'Torrent metadata ready' : 'Torrent loading failed'}
+              </p>
+              <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                {isInspecting
+                  ? 'You can keep using SeedFlow. The torrent remains safely paused while qBittorrent resolves its metadata.'
+                  : ready
+                  ? `${inspectedFiles.length} file${inspectedFiles.length === 1 ? '' : 's'} found. Open the selector when you're ready.`
+                  : error}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setBackgroundMode(false);
+                onOpen();
+              }}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition shrink-0"
+              title="Open torrent selector"
+              aria-label="Open torrent selector"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {isInspecting ? (
+            <div className="mt-3 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+              <div className="h-full w-1/3 bg-cyan-500 rounded-full animate-pulse" />
+            </div>
+          ) : (
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setBackgroundMode(false);
+                  onOpen();
+                }}
+                className="flex-1 px-3 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold transition"
+              >
+                {ready ? 'Open File Selection' : 'Open & Retry'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setBackgroundMode(false);
+                  onClose();
+                }}
+                className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 md:p-6 bg-black/80 backdrop-blur-sm animate-fadeIn">
@@ -501,35 +586,6 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
             </div>
           )}
 
-          {/* Category & Folder */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Target Folder
-              </label>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 text-xs focus:outline-none focus:border-cyan-500"
-              >
-                <option value="Downloads">Downloads (Default)</option>
-                <option value="Movies & Cinema">Movies & Cinema</option>
-                <option value="Lossless Audio & FLAC">Lossless Audio & FLAC</option>
-                <option value="Operating Systems">Operating Systems</option>
-                <option value="Shared Team Vault">Shared Team Vault</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Storage Allocation
-              </label>
-              <div className="px-3 py-2 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-400 text-xs flex items-center gap-2">
-                <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                <span className="truncate">Uncapped Server Storage (No 5GB cap)</span>
-              </div>
-            </div>
-          </div>
         </form>
 
         {/* Modal Footer */}
