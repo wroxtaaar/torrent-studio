@@ -120,11 +120,13 @@ async function qbtFetchOnce(pathname: string, init: RequestInit = {}, cookieOver
   const timeout = setTimeout(() => controller.abort(), 20000);
 
   try {
-    return await fetch(config.baseUrl + pathname, {
+    const response = await fetch(config.baseUrl + pathname, {
       ...init,
       headers,
       signal: controller.signal,
     });
+    console.log(`[QBT-DEBUG] ${init.method || 'GET'} ${pathname} -> HTTP ${response.status} cookie=${Boolean(headers.get('Cookie'))} auth=${Boolean(headers.get('Authorization'))}`);
+    return response;
   } finally {
     clearTimeout(timeout);
   }
