@@ -1049,7 +1049,10 @@ function getAuthToken(req: Request) {
   return token ? decodeURIComponent(token.slice(AUTH_COOKIE.length + 1)) : '';
 }
 function requireAuth(req: Request, res: Response, next: express.NextFunction) {
-  if (['/login','/logout','/api/auth/login','/api/auth/logout','/api/auth/session','/health'].includes(req.path)) return next();
+  if (
+    ['/login','/logout','/api/auth/login','/api/auth/logout','/api/auth/session','/health'].includes(req.path) ||
+    req.path.startsWith('/api/search/torrents/grab/')
+  ) return next();
 
   // qbtProxy performs search-result grabs inside the same trusted container.
   // Authenticate that server-to-server call with AUTH_SECRET instead of
