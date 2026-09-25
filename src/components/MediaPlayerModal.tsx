@@ -44,6 +44,7 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [mediaError, setMediaError] = useState('');
+  const [usingDirectFallback, setUsingDirectFallback] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -58,6 +59,7 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
     setDuration(0);
     setIsPlaying(true);
     setMediaError('');
+    setUsingDirectFallback(false);
   }, [file?.id]);
 
   useEffect(() => {
@@ -65,11 +67,31 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
     if (!media || !file) return;
 
     setMediaError('');
+    setUsingDirectFallback(false);
 
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
+
+    const directUrl = file.streamUrl.includes('/api/torrents/stream/')
+      ? file.streamUrl.replace('/api/torrents/stream/', '/api/torrents/direct-stream/')
+      : file.streamUrl.includes('/api/files/hls/')
+      ? file.streamUrl.replace('/api/files/hls/', '/api/files/direct-stream/').replace(/\/index\.m3u8$/, '')
+      : file.streamUrl;
+
+    const useDirectVideo = () => {
+      setUsingDirectFallback(true);
+      setMediaError('');
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+      media.pause();
+      media.src = directUrl;
+      media.load();
+      media.play().then(() => setIsPlaying(true)).catch(() => {});
+    };
 
     if (!isVideo) {
       media.src = file.streamUrl;
@@ -81,36 +103,57 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
       };
     }
 
-    // HLS.js handles HLS + MSE on Chromium/Firefox. Native HLS remains the
-    // fallback for browsers such as Safari.
-    if (Hls.isSupported()) {
+    // Prefer native HLS on browsers that provide it.
+    if (media.canPlayType('application/vnd.apple.mpegurl') && !usingDirectFallback) {
+      media.src = file.streamUrl;
+      media.load();
+      return () => {
+        media.pause();
+        media.removeAttribute('src');
+        media.load();
+      };
+    }
+
+    if (Hls.isSupported() && !usingDirectFallback) {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        backBufferLength: 90,
-        maxBufferLength: 60,
+        backBufferLength: 60,
+        maxBufferLength: 30,
         manifestLoadingTimeOut: 30000,
-        manifestLoadingMaxRetry: 4,
-        manifestLoadingRetryDelay: 1000,
+        manifestLoadingMaxRetry: 2,
+        manifestLoadingRetryDelay: 750,
         levelLoadingTimeOut: 30000,
-        levelLoadingMaxRetry: 4,
+        levelLoadingMaxRetry: 2,
         fragLoadingTimeOut: 30000,
-        fragLoadingMaxRetry: 4,
-        startFragPrefetch: true
+        fragLoadingMaxRetry: 2
       });
 
       hlsRef.current = hls;
 
       hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) {
-          console.error('[HLS] fatal playback error:', data);
-          setMediaError(
-            data.details
-              ? `HLS playback error: ${data.details}`
-              : 'Unable to load the HLS video stream.'
-          );
-          setIsPlaying(false);
+        if (!data.fatal) return;
+
+        console.error('[HLS] fatal playback error; switching to direct fragmented MP4:', data);
+
+        if (hlsRef.current === hls) {
+          hls.destroy();
+          hlsRef.current = null;
         }
+
+        setUsingDirectFallback(true);
+        setMediaError('HLS playback failed. Switching to direct browser playback…');
+
+        media.pause();
+        media.src = directUrl;
+        media.load();
+        media.play().then(() => {
+          setMediaError('');
+          setIsPlaying(true);
+        }).catch(() => {
+          setMediaError('Unable to play this video on this browser.');
+          setIsPlaying(false);
+        });
       });
 
       hls.loadSource(file.streamUrl);
@@ -125,18 +168,13 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
       };
     }
 
-    if (media.canPlayType('application/vnd.apple.mpegurl')) {
-      media.src = file.streamUrl;
+    useDirectVideo();
+
+    return () => {
+      media.pause();
+      media.removeAttribute('src');
       media.load();
-
-      return () => {
-        media.pause();
-        media.removeAttribute('src');
-        media.load();
-      };
-    }
-
-    setMediaError('This browser does not support HLS playback.');
+    };
   }, [file?.id, file?.streamUrl, isVideo]);
 
   if (!file) return null;
@@ -360,7 +398,9 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
               <p className="text-xs text-slate-400 flex items-center gap-2">
                 <span>{formatBytes(file.size)}</span>
                 <span>•</span>
-                <span className="text-emerald-400 font-medium">Adaptive HLS Streaming</span>
+                <span className="text-emerald-400 font-medium">
+                  {usingDirectFallback ? 'Direct Browser Streaming' : 'Adaptive Streaming'}
+                </span>
               </p>
             </div>
           </div>
@@ -410,7 +450,9 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
               <div className="max-w-md rounded-xl bg-slate-900/95 border border-rose-500/30 p-5">
                 <p className="text-sm font-semibold text-rose-300">{mediaError}</p>
                 <p className="text-xs text-slate-400 mt-2">
-                  The VPS analyzes the media and prepares a browser-compatible HLS stream.
+                  {usingDirectFallback
+                    ? 'The VPS is sending a browser-compatible fragmented MP4 stream.'
+                    : 'The VPS prepares a browser-compatible stream automatically.'}
                 </p>
               </div>
             </div>
