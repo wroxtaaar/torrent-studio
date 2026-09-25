@@ -103,18 +103,15 @@ async function qbtFetchOnce(pathname: string, init: RequestInit = {}): Promise<R
   const headers = new Headers(init.headers);
   if (config.apiKey) {
     headers.set('Authorization', `Bearer ${config.apiKey}`);
+  } else if (config.username && config.password) {
+    // qBittorrent 5.2+ supports HTTP Basic authentication. Use Basic as the
+    // primary transport instead of combining it with a potentially stale SID.
+    // Combining Cookie + Authorization can make qBittorrent authenticate the
+    // request against the stale cookie and return "Authentication required".
+    const basic = Buffer.from(`${config.username}:${config.password}`).toString('base64');
+    headers.set('Authorization', `Basic ${basic}`);
   } else {
     headers.set('Cookie', qbtSessionCookie);
-
-    // qBittorrent 5.2+ supports Basic authentication. Keep the credentials
-    // on every WebAPI request as a fallback for a stale/invalid QBT_SID cookie.
-    // qBittorrent uses Basic auth when there is no valid session cookie and
-    // then issues a fresh session cookie. This prevents one stale session from
-    // breaking POST endpoints such as fetchMetadata.
-    if (config.username && config.password) {
-      const basic = Buffer.from(`${config.username}:${config.password}`).toString('base64');
-      headers.set('Authorization', `Basic ${basic}`);
-    }
   }
   headers.set('Accept', headers.get('Accept') || 'application/json');
   headers.set('Referer', config.baseUrl + '/');
@@ -137,7 +134,9 @@ async function qbtFetchOnce(pathname: string, init: RequestInit = {}): Promise<R
 async function qbtFetch(pathname: string, init: RequestInit = {}): Promise<Response> {
   requireConfig();
 
-  if (!config.apiKey) await qbtLogin();
+  // qBittorrent 5.2+ uses Basic auth directly. Session-cookie login remains
+  // available when API-key/basic credentials are not configured.
+  if (!config.apiKey && !(config.username && config.password)) await qbtLogin();
 
   let response = await qbtFetchOnce(pathname, init);
 
@@ -147,7 +146,18 @@ async function qbtFetch(pathname: string, init: RequestInit = {}): Promise<Respo
   if ((response.status === 401 || response.status === 403) && !config.apiKey) {
     qbtSessionCookie = '';
     await qbtLogin();
-    response = await qbtFetchOnce(pathname, init);
+    // Retry through the session-cookie path only when Basic authentication
+    // was rejected. This keeps 5.2+ requests on the reliable Basic path.
+    const originalUsername = config.username;
+    const originalPassword = config.password;
+    try {
+      (config as any).username = undefined;
+      (config as any).password = undefined;
+      response = await qbtFetchOnce(pathname, init);
+    } finally {
+      (config as any).username = originalUsername;
+      (config as any).password = originalPassword;
+    }
   }
 
   return response;
