@@ -54,6 +54,7 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
   const [selectedAudioIndex, setSelectedAudioIndex] = useState<number | undefined>(undefined);
   const [selectedSubtitleIndex, setSelectedSubtitleIndex] = useState<number | undefined>(undefined);
   const [trackNotice, setTrackNotice] = useState('');
+  const [serverDuration, setServerDuration] = useState(0);
   const resumeTimeRef = useRef(0);
   const resumePlayingRef = useRef(false);
   const subtitleTrackRef = useRef<HTMLTrackElement>(null);
@@ -76,6 +77,7 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
     setSelectedAudioIndex(undefined);
     setSelectedSubtitleIndex(undefined);
     setTrackNotice('');
+    setServerDuration(0);
     resumeTimeRef.current = 0;
     resumePlayingRef.current = true;
     setUsingDirectFallback(false);
@@ -147,6 +149,7 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
       .then(response => response.ok ? response.json() : null)
       .then(data => {
         if (cancelled || !data) return;
+        setServerDuration(Number(data.duration) || 0);
         setAudioTracks(Array.isArray(data.audioTracks) ? data.audioTracks : []);
         setSubtitleTracks(Array.isArray(data.subtitleTracks) ? data.subtitleTracks : []);
       })
@@ -286,7 +289,11 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
 
   const onLoadedMetadata = () => {
     if (mediaRef.current) {
-      setDuration(mediaRef.current.duration || file.duration || 600);
+      const detectedDuration = mediaRef.current.duration;
+      const accurateDuration = Number.isFinite(detectedDuration) && detectedDuration > 5
+        ? detectedDuration
+        : (serverDuration || file.duration || 0);
+      setDuration(accurateDuration);
 
       if (resumePlayingRef.current) {
         mediaRef.current.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
@@ -307,7 +314,7 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
             </div>
             <div className="truncate">
               <p className="text-xs font-semibold text-slate-200 truncate">{file.name}</p>
-              <p className="text-[10px] text-slate-400">{formatDuration(currentTime)} / {formatDuration(duration || file.duration || 0)}</p>
+              <p className="text-[10px] text-slate-400">{formatDuration(currentTime)} / {formatDuration(duration || serverDuration || file.duration || 0)}</p>
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -379,7 +386,7 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
         <input
           type="range"
           min={0}
-          max={duration || file.duration || 100}
+          max={duration || serverDuration || file.duration || 100}
           value={currentTime}
           onChange={handleSeek}
           className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-400"
