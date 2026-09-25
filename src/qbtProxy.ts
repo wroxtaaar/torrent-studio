@@ -494,6 +494,37 @@ async function setFilePriorities(hash: string, manifest: Array<{ priority: numbe
   }
 }
 
+async function qbtFetchWithFreshSession(pathname: string, init: RequestInit = {}): Promise<Response> {
+  requireConfig();
+  if (config.apiKey) return qbtFetch(pathname, init);
+
+  // Use a fresh cookie session for metadata inspection. This mirrors the
+  // qBittorrent 5.2.3 flow that is known to work: login -> receive
+  // QBT_SID -> send that exact cookie on fetchMetadata. Do not mix Basic auth
+  // into this request because qBittorrent uses the valid session cookie first.
+  qbtSessionCookie = '';
+  await qbtLogin();
+
+  const headers = new Headers(init.headers);
+  headers.set('Cookie', qbtSessionCookie);
+  headers.delete('Authorization');
+  headers.set('Accept', headers.get('Accept') || 'application/json');
+  headers.set('Referer', config.baseUrl + '/');
+  headers.set('Origin', config.baseUrl);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+  try {
+    return await fetch(config.baseUrl + pathname, {
+      ...init,
+      headers,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function inspectMetadata(source: string) {
   // qBittorrent's fetchMetadata endpoint is asynchronous for magnets.
   // The first request normally returns HTTP 202 + an infohash, not the
@@ -501,7 +532,7 @@ async function inspectMetadata(source: string) {
   // with the complete torrent descriptor.
   for (let i = 0; i < 60; i++) {
     const params = new URLSearchParams({ source });
-    const response = await qbtFetch('/api/v2/torrents/fetchMetadata', {
+    const response = await qbtFetchWithFreshSession('/api/v2/torrents/fetchMetadata', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: params,
