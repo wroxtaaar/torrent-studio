@@ -31,28 +31,31 @@ jobs:
 
           ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
 
-          REMOTE_PATH="$(printf '%q' "$VPS_PROJECT_PATH")"
+          ssh -i ~/.ssh/id_ed25519 "$VPS_USER@$VPS_HOST" bash -s -- "$VPS_PROJECT_PATH" <<'REMOTE'
+          set -euo pipefail
 
-          ssh -i ~/.ssh/id_ed25519 "$VPS_USER@$VPS_HOST" "
-            set -e
-            cd $REMOTE_PATH
-            git fetch origin personal
-            git reset --hard origin/personal
-            docker compose up -d --build --force-recreate
-            docker compose ps
+          PROJECT_PATH="$1"
+          cd "$PROJECT_PATH"
 
-            echo "Waiting for Torrent Studio health endpoint..."
-            for i in $(seq 1 30); do
-              if curl --fail --silent --show-error http://127.0.0.1:3000/health; then
-                echo
-                echo "Torrent Studio is healthy."
-                exit 0
-              fi
-              echo "Health check attempt $i/30 failed; waiting 5 seconds..."
-              sleep 5
-            done
+          git fetch origin personal
+          git reset --hard origin/personal
 
-            echo "Torrent Studio did not become healthy within 150 seconds."
-            docker compose logs --tail=100 app
-            exit 1
-          "
+          docker compose up -d --build --force-recreate
+          docker compose ps
+
+          echo "Waiting for Torrent Studio health endpoint..."
+          for i in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/health; then
+              echo
+              echo "Torrent Studio is healthy."
+              exit 0
+            fi
+
+            echo "Health check attempt $i/30 failed; waiting 5 seconds..."
+            sleep 5
+          done
+
+          echo "Torrent Studio did not become healthy within 150 seconds."
+          docker compose logs --tail=100 app
+          exit 1
+          REMOTE
