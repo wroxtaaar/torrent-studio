@@ -544,67 +544,52 @@ async function qbtFetchWithFreshSession(pathname: string, init: RequestInit = {}
 }
 
 async function inspectMetadata(source: string) {
-  // qBittorrent's fetchMetadata resolves a magnet without creating a
-  // downloadable torrent. A fresh SID session is used because this exact
-  // login -> cookie -> fetchMetadata sequence is known to work on 5.2.3.
-  for (let i = 0; i < 60; i++) {
-    const response = await qbtFetchWithFreshSession('/api/v2/torrents/fetchMetadata', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ source }),
-    });
+  // qBittorrent's fetchMetadata is a trigger, not a metadata polling
+  // endpoint. For a magnet it normally returns HTTP 202 + the infohash.
+  // Repeating fetchMetadata creates a new metadata request instead of
+  // waiting for the torrent engine to finish resolving the existing one.
+  const response = await qbtFetch('/api/v2/torrents/fetchMetadata', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ source }),
+  });
 
-    const text = await response.text();
-    console.log(`[QBT-PROXY] fetchMetadata attempt ${i + 1}/60 -> HTTP ${response.status}: ${text.slice(0, 500)}`);
+  const text = await response.text();
+  console.log(`[QBT-PROXY] fetchMetadata -> HTTP ${response.status}: ${text.slice(0, 500)}`);
 
-    if (response.status !== 200 && response.status !== 202) {
-      throw Object.assign(new Error(text || response.statusText), { status: response.status });
-    }
-
-    if (text) {
-      try {
-        const data = JSON.parse(text);
-        const info = data?.info;
-
-        // qBittorrent 5.2.x returns the completed descriptor under
-        // data.info. Multi-file torrents use info.files; single-file
-        // torrents use info.length + info.name.
-        if (data?.hash && info) {
-          const rawFiles = Array.isArray(info.files)
-            ? info.files.map((file: any, index: number) => ({
-                index,
-                name: Array.isArray(file.path)
-                  ? file.path.map((part: any) => String(part)).join('/')
-                  : String(file.path || `File_${index + 1}`),
-                size: Number(file.length ?? 0),
-                path: Array.isArray(file.path)
-                  ? file.path.map((part: any) => String(part)).join('/')
-                  : String(file.path || `File_${index + 1}`),
-                priority: 0,
-              }))
-            : [{
-                index: 0,
-                name: String(info.name || 'Torrent'),
-                size: Number(info.length ?? 0),
-                path: String(info.name || 'Torrent'),
-                priority: 0,
-              }];
-
-          return {
-            hash: String(data.hash).toLowerCase(),
-            name: String(info.name || 'Torrent'),
-            files: rawFiles,
-          };
-        }
-      } catch {
-        // Metadata is still being resolved.
-      }
-    }
-
-    await new Promise(resolve => setTimeout(resolve, 1000));
+  if (response.status !== 200 && response.status !== 202) {
+    throw Object.assign(new Error(text || response.statusText), { status: response.status });
   }
 
-  return null;
+  let data: any = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    // Keep the returned hash from the URL when possible.
+  }
+
+  const hash = String(data?.hash || extractInfoHash(source)).toLowerCase();
+  if (!hash) return null;
+
+  // The metadata request is asynchronous. Poll the torrent's file list,
+  // which is the authoritative signal that qBittorrent has decoded the
+  // torrent metadata. Do not call fetchMetadata again while waiting.
+  const files = await waitForTorrentFiles(hash, 30, 1000);
+  if (!files.length) return null;
+
+  let name = 'Torrent';
+  try {
+    const info = await qbtJson('/api/v2/torrents/info?hash=' + encodeURIComponent(hash));
+    if (Array.isArray(info) && info[0]?.name) name = String(info[0].name);
+  } catch {
+    // File metadata is sufficient to display the selection UI.
+  }
+
+  return {
+    name,
+    hash,
+    files,
+  };
 }
 
 export function installQbtProxy(app: Express) {
