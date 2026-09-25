@@ -260,7 +260,7 @@ function scanFiles(): StorageFile[] {
         ownerId: activeUser().id, ownerName: activeUser().name,
         downloadUrl: '/api/files/download/' + fileId(rel),
         streamUrl: type === 'video'
-          ? '/api/files/hls/' + fileId(rel) + '/index.m3u8'
+          ? '/api/files/direct-stream/' + fileId(rel)
           : '/api/files/stream/' + fileId(rel)
       });
     }
@@ -601,14 +601,15 @@ function resolveQbtDownloadPath(torrent: any, qbtFile: any): string | null {
 
 const streamPreparation = new Map<string, Promise<string>>();
 
-function streamCachePath(sourcePath: string) {
+function streamCachePath(sourcePath: string, audioStreamIndex?: number) {
   const stat = fs.statSync(sourcePath);
   const key = crypto
     .createHash('sha256')
-    .update('browser-h264-v2')
+    .update('browser-h264-v3')
     .update(sourcePath)
     .update(String(stat.size))
     .update(String(stat.mtimeMs))
+    .update(String(audioStreamIndex ?? 'default'))
     .digest('hex');
   return path.join(STREAM_CACHE_DIR, key + '.mp4');
 }
@@ -633,8 +634,39 @@ async function runFfmpeg(args: string[]): Promise<void> {
   });
 }
 
-async function prepareBrowserVideo(sourcePath: string): Promise<string> {
-  const cached = streamCachePath(sourcePath);
+async function probeMedia(sourcePath: string): Promise<any[]> {
+  const result = await runCommand('ffprobe', [
+    '-v', 'error',
+    '-print_format', 'json',
+    '-show_streams',
+    sourcePath
+  ]);
+  const parsed = JSON.parse(result.stdout || '{}');
+  return Array.isArray(parsed?.streams) ? parsed.streams : [];
+}
+
+async function prepareBrowserVideo(sourcePath: string, requestedAudioStreamIndex?: number): Promise<string> {
+  let streams: any[];
+  try {
+    streams = await probeMedia(sourcePath);
+  } catch {
+    throw new Error('ffprobe could not analyze this video.');
+  }
+
+  const video = streams.find((s: any) => s.codec_type === 'video');
+  const audios = streams.filter((s: any) => s.codec_type === 'audio');
+  if (!video) throw new Error('No video stream was found in this file.');
+
+  const selectedAudio =
+    requestedAudioStreamIndex === undefined
+      ? audios[0]
+      : audios.find((s: any) => Number(s.index) === requestedAudioStreamIndex);
+
+  if (requestedAudioStreamIndex !== undefined && !selectedAudio) {
+    throw new Error('Requested audio track was not found.');
+  }
+
+  const cached = streamCachePath(sourcePath, selectedAudio?.index);
   if (fs.existsSync(cached) && fs.statSync(cached).size > 0) return cached;
 
   const existing = streamPreparation.get(cached);
@@ -644,21 +676,22 @@ async function prepareBrowserVideo(sourcePath: string): Promise<string> {
     const temp = cached + '.tmp';
     fs.rmSync(temp, { force: true });
 
-    // Always produce a browser-safe H.264/AVC + AAC MP4. This avoids relying
-    // on the source MKV codec/profile being supported by Chromium/Edge.
     await runFfmpeg([
       '-i', sourcePath,
       '-map', '0:v:0',
-      '-map', '0:a:0?',
+      ...(selectedAudio ? ['-map', `0:${selectedAudio.index}?`] : []),
+      '-map_metadata', '0',
       '-c:v', 'libx264',
       '-preset', 'veryfast',
       '-crf', '23',
       '-pix_fmt', 'yuv420p',
       '-profile:v', 'high',
       '-level:v', '4.1',
-      '-c:a', 'aac',
-      '-b:a', '160k',
-      '-ar', '48000',
+      ...(selectedAudio
+        ? (String(selectedAudio.codec_name || '').toLowerCase() === 'aac'
+          ? ['-c:a', 'copy']
+          : ['-c:a', 'aac', '-b:a', '160k', '-ar', '48000'])
+        : []),
       '-movflags', '+faststart',
       '-f', 'mp4',
       temp
@@ -680,90 +713,64 @@ async function prepareBrowserVideo(sourcePath: string): Promise<string> {
   }
 }
 
-async function streamBrowserVideo(sourcePath: string, res: Response, onClose?: () => void): Promise<void> {
-  let probe: any;
-  try {
-    const result = await runCommand('ffprobe', [
-      '-v', 'error',
-      '-print_format', 'json',
-      '-show_streams',
-      sourcePath
+const subtitlePreparation = new Map<string, Promise<string>>();
+
+function subtitleCachePath(sourcePath: string, streamIndex: number) {
+  const stat = fs.statSync(sourcePath);
+  const key = crypto
+    .createHash('sha256')
+    .update('subtitle-v1')
+    .update(sourcePath)
+    .update(String(stat.size))
+    .update(String(stat.mtimeMs))
+    .update(String(streamIndex))
+    .digest('hex');
+  return path.join(STREAM_CACHE_DIR, key + '.vtt');
+}
+
+async function prepareSubtitleVtt(sourcePath: string, streamIndex: number): Promise<string> {
+  const cached = subtitleCachePath(sourcePath, streamIndex);
+  if (fs.existsSync(cached) && fs.statSync(cached).size > 0) return cached;
+
+  const existing = subtitlePreparation.get(cached);
+  if (existing) return existing;
+
+  const job = (async () => {
+    const temp = cached + '.tmp';
+    fs.rmSync(temp, { force: true });
+
+    await runFfmpeg([
+      '-i', sourcePath,
+      '-map', `0:${streamIndex}`,
+      '-c:s', 'webvtt',
+      '-f', 'webvtt',
+      temp
     ]);
-    probe = JSON.parse(result.stdout || '{}');
-  } catch {
-    throw new Error('ffprobe could not analyze this video.');
-  }
 
-  const streams = Array.isArray(probe?.streams) ? probe.streams : [];
-  const video = streams.find((s: any) => s.codec_type === 'video');
-  const audio = streams.find((s: any) => s.codec_type === 'audio');
-  if (!video) throw new Error('No video stream was found in this file.');
-
-  const videoCopySafe =
-    String(video.codec_name || '').toLowerCase() === 'h264' &&
-    ['yuv420p', 'yuvj420p'].includes(String(video.pix_fmt || '').toLowerCase());
-
-  const audioCopySafe = !audio || String(audio.codec_name || '').toLowerCase() === 'aac';
-
-  const args = [
-    '-i', sourcePath,
-    '-map', '0:v:0',
-    ...(audio ? ['-map', '0:a:0?'] : []),
-    '-c:v', videoCopySafe ? 'copy' : 'libx264',
-    ...(videoCopySafe ? [] : [
-      '-preset', 'veryfast',
-      '-crf', '23',
-      '-pix_fmt', 'yuv420p',
-      '-profile:v', 'high',
-      '-level:v', '4.1'
-    ]),
-    ...(audio
-      ? (audioCopySafe
-        ? ['-c:a', 'copy']
-        : ['-c:a', 'aac', '-b:a', '160k', '-ar', '48000'])
-      : []),
-    // Fragmented MP4 can be played directly by the browser as the encoder
-    // produces it, without MediaSource/HLS and without waiting for the entire
-    // file to be transcoded.
-    '-movflags', '+frag_keyframe+empty_moov+default_base_moof',
-    '-f', 'mp4',
-    'pipe:1'
-  ];
-
-  const ffmpeg = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...args], {
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-
-  let stderr = '';
-  ffmpeg.stderr.on('data', chunk => {
-    stderr += chunk.toString();
-    if (stderr.length > 6000) stderr = stderr.slice(-6000);
-  });
-
-  ffmpeg.on('error', error => {
-    console.error('[DIRECT-STREAM] ffmpeg error:', error);
-  });
-
-  ffmpeg.on('close', code => {
-    if (code !== 0 && !res.writableEnded) {
-      console.error('[DIRECT-STREAM] ffmpeg failed:', stderr.trim() || `exit ${code}`);
-      if (!res.headersSent) res.status(502).send('Unable to encode video for browser playback.');
-      else res.end();
+    if (!fs.existsSync(temp) || fs.statSync(temp).size === 0) {
+      throw new Error('ffmpeg produced an empty subtitle track');
     }
-    onClose?.();
-  });
 
-  res.setHeader('Content-Type', 'video/mp4');
-  res.setHeader('Cache-Control', 'no-store');
-  res.setHeader('Accept-Ranges', 'none');
-  res.setHeader('X-SeedFlow-Stream', 'fragmented-mp4');
+    fs.renameSync(temp, cached);
+    return cached;
+  })();
 
-  reqOnClose(res, () => {
-    if (!ffmpeg.killed) ffmpeg.kill('SIGTERM');
-    onClose?.();
-  });
+  subtitlePreparation.set(cached, job);
+  try {
+    return await job;
+  } finally {
+    subtitlePreparation.delete(cached);
+  }
+}
 
-  ffmpeg.stdout.pipe(res);
+
+async function streamBrowserVideo(
+  sourcePath: string,
+  res: Response,
+  requestedAudioStreamIndex?: number
+): Promise<void> {
+  const cached = await prepareBrowserVideo(sourcePath, requestedAudioStreamIndex);
+  sendFile(null as any, res, cached, false);
 }
 
 function reqOnClose(res: Response, callback: () => void) {
@@ -1227,6 +1234,72 @@ async function main() {
     return res.redirect(302, `/api/files/direct-stream/${encodeURIComponent(f.id)}`);
   });
 
+  app.get('/api/files/media-info/:id', async (req,res)=>{
+    const f = scanFiles().find(x => x.id === req.params.id);
+    if (!f || f.type !== 'video') return res.status(404).send('Video not found');
+
+    const fullPath = physicalFromRelative(f.path.slice(1));
+    if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) {
+      return res.status(404).send('Video not found');
+    }
+
+    try {
+      const streams = await probeMedia(fullPath);
+      const audioTracks = streams
+        .filter((s: any) => s.codec_type === 'audio')
+        .map((s: any) => ({
+          index: Number(s.index),
+          language: String(s.tags?.language || s.tags?.LANGUAGE || ''),
+          title: String(s.tags?.title || s.tags?.handler_name || ''),
+          codec: String(s.codec_name || ''),
+          channels: Number(s.channels || 0),
+          default: Number(s.disposition?.default || 0) === 1
+        }));
+      const subtitleTracks = streams
+        .filter((s: any) =>
+          s.codec_type === 'subtitle' &&
+          ['subrip','srt','ass','ssa','webvtt','mov_text','text'].includes(String(s.codec_name || '').toLowerCase())
+        )
+        .map((s: any) => ({
+          index: Number(s.index),
+          language: String(s.tags?.language || s.tags?.LANGUAGE || ''),
+          title: String(s.tags?.title || s.tags?.handler_name || ''),
+          codec: String(s.codec_name || ''),
+          url: `/api/files/subtitle/${encodeURIComponent(f.id)}/${Number(s.index)}.vtt`
+        }));
+      res.json({ audioTracks, subtitleTracks });
+    } catch (error: any) {
+      res.status(500).send(error?.message || 'Unable to inspect media tracks');
+    }
+  });
+
+  app.get('/api/files/subtitle/:id/:streamIndex.vtt', async (req,res)=>{
+    const f = scanFiles().find(x => x.id === req.params.id);
+    if (!f || f.type !== 'video') return res.status(404).send('Video not found');
+    const streamIndex = Number(req.params.streamIndex);
+    if (!Number.isInteger(streamIndex) || streamIndex < 0) return res.status(400).send('Invalid subtitle index');
+
+    const fullPath = physicalFromRelative(f.path.slice(1));
+    if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) return res.status(404).send('Video not found');
+
+    try {
+      const streams = await probeMedia(fullPath);
+      const subtitle = streams.find((s: any) =>
+        s.codec_type === 'subtitle' &&
+        Number(s.index) === streamIndex &&
+        ['subrip','srt','ass','ssa','webvtt','mov_text','text'].includes(String(s.codec_name || '').toLowerCase())
+      );
+      if (!subtitle) return res.status(404).send('Subtitle track not found');
+
+      const vttPath = await prepareSubtitleVtt(fullPath, streamIndex);
+      res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      return res.sendFile(vttPath);
+    } catch (error: any) {
+      return res.status(500).send(error?.message || 'Unable to prepare subtitles');
+    }
+  });
+
   app.get('/api/files/direct-stream/:id', async (req,res)=>{
     const f = scanFiles().find(x => x.id === req.params.id);
     if (!f || f.type !== 'video') return res.status(404).send('Video not found');
@@ -1239,7 +1312,12 @@ async function main() {
     log('stream','Direct browser video stream',f.path,'info');
 
     try {
-      await streamBrowserVideo(fullPath, res);
+      const audioParam = req.query.audio;
+      const audioIndex =
+        audioParam !== undefined && Number.isInteger(Number(audioParam))
+          ? Number(audioParam)
+          : undefined;
+      await streamBrowserVideo(fullPath, res, audioIndex);
     } catch (error: any) {
       console.error('[DIRECT-STREAM] preparation failed:', error);
       if (!res.headersSent) return res.status(500).send(error?.message || 'Unable to prepare video.');
@@ -1402,6 +1480,80 @@ async function main() {
     res.json({isExternal:false,host:qbtBase,username:qbtUser,connected,version});
   });
 
+  app.get('/api/torrents/media-info/:hash/:index', async (req,res)=>{
+    try {
+      const hash = String(req.params.hash || '').trim();
+      const index = Number(req.params.index);
+      const list: any[] = await qbtJson('/api/v2/torrents/info?hash=' + encodeURIComponent(hash));
+      const torrent = list?.[0];
+      if (!torrent) return res.status(404).send('Torrent not found');
+      const files: any[] = await qbtJson('/api/v2/torrents/files?hash=' + encodeURIComponent(hash));
+      const file = files.find((item: any) => Number(item.index) === index);
+      if (!file) return res.status(404).send('Torrent file not found');
+      const candidate = resolveQbtDownloadPath(torrent, file);
+      if (!candidate) return res.status(404).send('Downloaded file not found');
+
+      const streams = await probeMedia(candidate);
+      const audioTracks = streams.filter((s: any) => s.codec_type === 'audio').map((s: any) => ({
+        index: Number(s.index),
+        language: String(s.tags?.language || s.tags?.LANGUAGE || ''),
+        title: String(s.tags?.title || s.tags?.handler_name || ''),
+        codec: String(s.codec_name || ''),
+        channels: Number(s.channels || 0),
+        default: Number(s.disposition?.default || 0) === 1
+      }));
+      const subtitleTracks = streams
+        .filter((s: any) =>
+          s.codec_type === 'subtitle' &&
+          ['subrip','srt','ass','ssa','webvtt','mov_text','text'].includes(String(s.codec_name || '').toLowerCase())
+        )
+        .map((s: any) => ({
+          index: Number(s.index),
+          language: String(s.tags?.language || s.tags?.LANGUAGE || ''),
+          title: String(s.tags?.title || s.tags?.handler_name || ''),
+          codec: String(s.codec_name || ''),
+          url: `/api/torrents/subtitle/${encodeURIComponent(hash)}/${index}/${Number(s.index)}.vtt`
+        }));
+
+      res.json({ audioTracks, subtitleTracks });
+    } catch (error: any) {
+      console.error('[TORRENT-MEDIA-INFO]', error?.message || error);
+      res.status(502).send(error?.message || 'Unable to inspect media tracks');
+    }
+  });
+
+  app.get('/api/torrents/subtitle/:hash/:index/:streamIndex.vtt', async (req,res)=>{
+    try {
+      const hash = String(req.params.hash || '').trim();
+      const index = Number(req.params.index);
+      const streamIndex = Number(req.params.streamIndex);
+      const list: any[] = await qbtJson('/api/v2/torrents/info?hash=' + encodeURIComponent(hash));
+      const torrent = list?.[0];
+      if (!torrent) return res.status(404).send('Torrent not found');
+      const files: any[] = await qbtJson('/api/v2/torrents/files?hash=' + encodeURIComponent(hash));
+      const file = files.find((item: any) => Number(item.index) === index);
+      if (!file) return res.status(404).send('Torrent file not found');
+      const candidate = resolveQbtDownloadPath(torrent, file);
+      if (!candidate) return res.status(404).send('Downloaded file not found');
+
+      const streams = await probeMedia(candidate);
+      const subtitle = streams.find((s: any) =>
+        s.codec_type === 'subtitle' &&
+        Number(s.index) === streamIndex &&
+        ['subrip','srt','ass','ssa','webvtt','mov_text','text'].includes(String(s.codec_name || '').toLowerCase())
+      );
+      if (!subtitle) return res.status(404).send('Subtitle track not found');
+
+      const vttPath = await prepareSubtitleVtt(candidate, streamIndex);
+      res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      return res.sendFile(vttPath);
+    } catch (error: any) {
+      console.error('[TORRENT-SUBTITLE]', error?.message || error);
+      res.status(502).send(error?.message || 'Unable to prepare subtitles');
+    }
+  });
+
   app.get('/api/torrents/direct-stream/:hash/:index', async (req, res) => {
     try {
       const hash = String(req.params.hash || '').trim();
@@ -1427,7 +1579,12 @@ async function main() {
       const type = fileType(path.basename(candidate));
       if (type !== 'video') return res.status(415).send('This endpoint is for video files');
 
-      await streamBrowserVideo(candidate, res);
+      const audioParam = req.query.audio;
+      const audioIndex =
+        audioParam !== undefined && Number.isInteger(Number(audioParam))
+          ? Number(audioParam)
+          : undefined;
+      await streamBrowserVideo(candidate, res, audioIndex);
     } catch (e: any) {
       console.error('[TORRENT-DIRECT-STREAM]', e?.message || e);
       if (!res.headersSent) return res.status(502).send(e?.message || 'Unable to stream torrent file');
@@ -1466,7 +1623,7 @@ async function main() {
       }
 
       if (type === 'video') {
-        return res.redirect(302, '/api/torrents/direct-stream/' + encodeURIComponent(hash) + '/' + encodeURIComponent(index));
+        return res.redirect(302, '/api/torrents/direct-stream/' + encodeURIComponent(hash) + '/' + encodeURIComponent(index) + (req.query.audio ? '?audio=' + encodeURIComponent(String(req.query.audio)) : ''));
       }
 
       return res.redirect(302, '/api/files/stream/' + encodeURIComponent(id));
