@@ -7,6 +7,7 @@ type QbtConfig = {
   username?: string;
   password?: string;
   apiKey?: string;
+  internalSecret?: string;
 };
 
 const config: QbtConfig = {
@@ -14,6 +15,7 @@ const config: QbtConfig = {
   username: process.env.QBT_USERNAME || process.env.QBITTORRENT_USERNAME,
   password: process.env.QBT_PASSWORD || process.env.QBITTORRENT_PASSWORD,
   apiKey: process.env.QBT_API_KEY || process.env.QBITTORRENT_API_KEY,
+  internalSecret: process.env.AUTH_SECRET,
 };
 
 // Same-container address used to resolve relative Search -> Add links.
@@ -289,6 +291,7 @@ async function addTorrentForMetadata(urls: string, category: string, authHeaders
     // server-to-server request.
     if (authHeaders?.authorization) headers.Authorization = authHeaders.authorization;
     if (authHeaders?.cookie) headers.Cookie = authHeaders.cookie;
+    if (config.internalSecret) headers['X-Torrent-Studio-Internal'] = config.internalSecret;
 
     const response = await fetch(resolvedSource, { headers });
 
