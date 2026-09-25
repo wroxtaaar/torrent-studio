@@ -1,0 +1,42 @@
+name: Deploy Torrent Studio
+
+on:
+  push:
+    branches:
+      - personal
+
+concurrency:
+  group: torrent-studio-personal-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to Oracle VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_PROJECT_PATH: ${{ secrets.VPS_PROJECT_PATH }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+          ssh -i ~/.ssh/id_ed25519 "$VPS_USER@$VPS_HOST" '
+            set -e
+            cd "$VPS_PROJECT_PATH"
+            git fetch origin personal
+            git reset --hard origin/personal
+            docker compose up -d --build --force-recreate
+            docker compose ps
+            curl --fail --silent --show-error http://127.0.0.1:3000/health
+          '
