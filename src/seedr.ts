@@ -37,7 +37,7 @@ export async function addSeedrTask(magnet: string): Promise<any> {
   return seedrRequest('/tasks', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ magnet }),
+    body: JSON.stringify({ torrent_magnet: magnet, folder_id: 0 }),
   });
 }
 
