@@ -71,6 +71,13 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
     setDuration(0);
     setIsPlaying(true);
     setMediaError('');
+    setAudioTracks([]);
+    setSubtitleTracks([]);
+    setSelectedAudioIndex(undefined);
+    setSelectedSubtitleIndex(undefined);
+    setTrackNotice('');
+    resumeTimeRef.current = 0;
+    resumePlayingRef.current = true;
     setUsingDirectFallback(false);
   }, [file?.id]);
 
