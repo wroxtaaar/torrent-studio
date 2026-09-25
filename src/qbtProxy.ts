@@ -105,6 +105,16 @@ async function qbtFetchOnce(pathname: string, init: RequestInit = {}): Promise<R
     headers.set('Authorization', `Bearer ${config.apiKey}`);
   } else {
     headers.set('Cookie', qbtSessionCookie);
+
+    // qBittorrent 5.2+ supports Basic authentication. Keep the credentials
+    // on every WebAPI request as a fallback for a stale/invalid QBT_SID cookie.
+    // qBittorrent uses Basic auth when there is no valid session cookie and
+    // then issues a fresh session cookie. This prevents one stale session from
+    // breaking POST endpoints such as fetchMetadata.
+    if (config.username && config.password) {
+      const basic = Buffer.from(`${config.username}:${config.password}`).toString('base64');
+      headers.set('Authorization', `Basic ${basic}`);
+    }
   }
   headers.set('Accept', headers.get('Accept') || 'application/json');
   headers.set('Referer', config.baseUrl + '/');
