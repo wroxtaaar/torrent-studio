@@ -97,6 +97,7 @@ export default function App() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [qbtSettings, setQbtSettings] = useState<QbtSettings | null>(null);
   const [cleanupSettings, setCleanupSettings] = useState<CleanupSettings | null>(null);
+  const [seedrNotice, setSeedrNotice] = useState<{ taskId: number | null; name: string } | null>(null);
 
   // File Explorer State
   const [currentFolder, setCurrentFolder] = useState<string>('/');
@@ -265,7 +266,15 @@ export default function App() {
     manifest?: { name: string; size: number; priority: number }[],
     existingHash?: string
   ) => {
-    await api.addMagnet(magnet, category, selectedFiles, manifest, existingHash);
+    const result = await api.addMagnet(magnet, category, selectedFiles, manifest, existingHash);
+    if (result.backend === 'seedr') {
+      setSeedrNotice({
+        taskId: result.seedrTaskId ?? null,
+        name: manifest?.[0]?.name || magnet
+      });
+    } else {
+      setSeedrNotice(null);
+    }
     const updated = await api.getTorrents();
     setTorrents(updated);
     const stats = await api.getStorageStats();
@@ -733,6 +742,15 @@ export default function App() {
         {/* TAB 1: TRANSFERS & SEEDBOX */}
         {activeTab === 'transfers' && (
           <div className="space-y-4">
+            {seedrNotice && (
+              <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 text-xs flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-bold">Sent to Seedr</div>
+                  <div className="text-emerald-400/80 mt-0.5 truncate">{seedrNotice.name}</div>
+                </div>
+                <span className="shrink-0 font-mono text-[11px]">Task {seedrNotice.taskId ?? 'created'}</span>
+              </div>
+            )}
             {/* Action header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-slate-900 border border-slate-800">
               <div>
