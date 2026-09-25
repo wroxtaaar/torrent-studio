@@ -729,19 +729,91 @@ export function installQbtProxy(app: Express) {
 
         const category = String((req.body as any)?.category || 'Downloads');
 
-        // A file list only exists after qBittorrent has a torrent object.
-        // fetchMetadata is useful for caching metadata, but it does not create
-        // a torrent, so /torrents/files can legitimately return 404 for its
-        // returned infohash. For the selection UI we therefore create/reuse
-        // the torrent paused, then read its authoritative file list.
+        // Search results are represented by a protected server-side grab URL.
+        // Resolve it first. If Prowlarr redirects/returns a magnet, inspect that
+        // magnet through fetchMetadata rather than treating an old qBittorrent
+        // infohash entry as proof that its file metadata is ready.
+        if (isInternalSearchGrab) {
+          const resolved = internalServerBase + source;
+          const response = await fetch(resolved, {
+            headers: { Accept: 'text/plain, application/x-bittorrent, */*' },
+          });
+          const resolvedText = (await response.text()).trim();
+
+          if (!response.ok) {
+            throw Object.assign(
+              new Error(resolvedText || `Unable to resolve search torrent (HTTP ${response.status})`),
+              { status: response.status }
+            );
+          }
+
+          if (/^magnet:\?/i.test(resolvedText)) {
+            const resolvedHash = extractInfoHash(resolvedText);
+            const metadata = await inspectMetadata(resolvedText);
+
+            if (metadata) {
+              const mappedFiles = mapInspectFiles(
+                Array.isArray(metadata.files) ? metadata.files : []
+              );
+
+              if (resolvedHash) rememberPreviewTorrent(resolvedText, resolvedHash);
+
+              return res.json({
+                name: metadata.name || 'Torrent',
+                hash: resolvedHash,
+                files: mappedFiles,
+                totalSize: mappedFiles.reduce((sum: number, f: any) => sum + f.size, 0),
+                source: 'qbt_search_metadata'
+              });
+            }
+
+            return res.status(202).json({
+              name: 'Torrent',
+              hash: resolvedHash,
+              files: [],
+              totalSize: 0,
+              source: 'qbt_metadata_pending',
+              pending: true,
+              message: 'qBittorrent is still obtaining the torrent metadata.'
+            });
+          }
+        }
+
+        // Direct magnets/hashes and search results that resolve to .torrent
+        // descriptors use the paused torrent path. This creates the torrent
+        // only for final file selection, never starts it during inspection.
         let hash = sourceHash;
 
         if (hash && await torrentExists(hash)) {
-          // Reuse an existing torrent without changing its current state.
-        } else {
-          const hashes = await addTorrentForMetadata(source, category);
-          hash = hashes[0];
+          // Reuse an existing torrent only when its actual file list is
+          // available. Metadata-only entries are not considered ready.
+          try {
+            const existingFiles = await getFiles(hash);
+            if (existingFiles.length) {
+              rememberPreviewTorrent(source, hash);
+              const mappedFiles = mapInspectFiles(existingFiles);
+              let name = 'Torrent';
+              try {
+                const info = await qbtJson('/api/v2/torrents/info?hash=' + encodeURIComponent(hash));
+                if (Array.isArray(info) && info[0]?.name) name = String(info[0].name);
+              } catch {
+                // File metadata is enough for the selection UI.
+              }
+              return res.json({
+                name,
+                hash,
+                files: mappedFiles,
+                totalSize: mappedFiles.reduce((sum: number, f: any) => sum + f.size, 0),
+                source: 'qbt_torrent_files'
+              });
+            }
+          } catch {
+            // Existing metadata-only/stale entry; continue with the normal add path.
+          }
         }
+
+        const hashes = await addTorrentForMetadata(source, category);
+        hash = hashes[0];
 
         if (!hash) {
           return res.status(502).json({
@@ -781,7 +853,6 @@ export function installQbtProxy(app: Express) {
           source: 'qbt_torrent_files'
         });
       }
-
       if (route === '/torrents/upload-torrent' && method === 'POST') {
         const base64 = String((req.body as any)?.base64 || '');
         const filename = String((req.body as any)?.filename || 'upload.torrent');
