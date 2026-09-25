@@ -544,52 +544,74 @@ async function qbtFetchWithFreshSession(pathname: string, init: RequestInit = {}
 }
 
 async function inspectMetadata(source: string) {
-  // qBittorrent's fetchMetadata is a trigger, not a metadata polling
-  // endpoint. For a magnet it normally returns HTTP 202 + the infohash.
-  // Repeating fetchMetadata creates a new metadata request instead of
-  // waiting for the torrent engine to finish resolving the existing one.
-  const response = await qbtFetch('/api/v2/torrents/fetchMetadata', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ source }),
-  });
+  // Use a fresh qBittorrent WebAPI session for metadata inspection.
+  // This endpoint is a POST and qBittorrent 5.2.x can reject a shared/stale
+  // session even when normal GET requests still succeed. The in-container
+  // diagnostic proved that login -> Cookie -> fetchMetadata works reliably.
+  async function fetchMetadataWithFreshSession() {
+    qbtSessionCookie = '';
+    await qbtLogin();
+    let response = await qbtFetchOnce(
+      '/api/v2/torrents/fetchMetadata',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ source }),
+      },
+      qbtSessionCookie
+    );
 
-  const text = await response.text();
-  console.log(`[QBT-PROXY] fetchMetadata -> HTTP ${response.status}: ${text.slice(0, 500)}`);
+    if (response.status === 401 || response.status === 403) {
+      qbtSessionCookie = '';
+      await qbtLogin();
+      response = await qbtFetchOnce(
+        '/api/v2/torrents/fetchMetadata',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ source }),
+        },
+        qbtSessionCookie
+      );
+    }
 
-  if (response.status !== 200 && response.status !== 202) {
-    throw Object.assign(new Error(text || response.statusText), { status: response.status });
+    return response;
   }
 
-  let data: any = null;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    // Keep the returned hash from the URL when possible.
+  // qBittorrent's fetchMetadata endpoint is asynchronous for magnets.
+  // The first request normally returns HTTP 202 + an infohash. Keep polling
+  // with the same authenticated session until metadata is available.
+  for (let i = 0; i < 60; i++) {
+    const response = await fetchMetadataWithFreshSession();
+    const text = await response.text();
+
+    console.log(
+      `[QBT-PROXY] fetchMetadata attempt ${i + 1}/60 -> HTTP ${response.status}: ${text.slice(0, 500)}`
+    );
+
+    if (response.status !== 200 && response.status !== 202) {
+      throw Object.assign(
+        new Error(text || response.statusText || 'qBittorrent metadata request failed'),
+        { status: response.status }
+      );
+    }
+
+    if (text) {
+      try {
+        const data = JSON.parse(text);
+
+        if (data && (data.name || Array.isArray(data.files))) {
+          return data;
+        }
+      } catch {
+        // Metadata is still being resolved.
+      }
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 1000));
   }
 
-  const hash = String(data?.hash || extractInfoHash(source)).toLowerCase();
-  if (!hash) return null;
-
-  // The metadata request is asynchronous. Poll the torrent's file list,
-  // which is the authoritative signal that qBittorrent has decoded the
-  // torrent metadata. Do not call fetchMetadata again while waiting.
-  const files = await waitForTorrentFiles(hash, 30, 1000);
-  if (!files.length) return null;
-
-  let name = 'Torrent';
-  try {
-    const info = await qbtJson('/api/v2/torrents/info?hash=' + encodeURIComponent(hash));
-    if (Array.isArray(info) && info[0]?.name) name = String(info[0].name);
-  } catch {
-    // File metadata is sufficient to display the selection UI.
-  }
-
-  return {
-    name,
-    hash,
-    files,
-  };
+  return null;
 }
 
 export function installQbtProxy(app: Express) {
