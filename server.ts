@@ -610,7 +610,7 @@ function streamCachePath(sourcePath: string, audioStreamIndex?: number) {
   const stat = fs.statSync(sourcePath);
   const key = crypto
     .createHash('sha256')
-    .update('browser-h264-v3')
+    .update('browser-h264-v4')
     .update(sourcePath)
     .update(String(stat.size))
     .update(String(stat.mtimeMs))
@@ -686,6 +686,7 @@ async function prepareBrowserVideo(sourcePath: string, requestedAudioStreamIndex
       ['yuv420p', 'yuvj420p'].includes(String(video.pix_fmt || '').toLowerCase());
 
     await runFfmpeg([
+      '-fflags', '+genpts',
       '-i', sourcePath,
       '-map', '0:v:0',
       ...(selectedAudio ? ['-map', `0:${selectedAudio.index}?`] : []),
@@ -703,6 +704,7 @@ async function prepareBrowserVideo(sourcePath: string, requestedAudioStreamIndex
           ? ['-c:a', 'copy']
           : ['-c:a', 'aac', '-b:a', '160k', '-ar', '48000'])
         : []),
+      '-avoid_negative_ts', 'make_zero',
       '-movflags', '+faststart',
       '-f', 'mp4',
       temp
@@ -1338,6 +1340,17 @@ async function main() {
 
     try {
       const streams = await probeMedia(fullPath);
+      let mediaDuration = 0;
+      try {
+        const probeResult = await runCommand('ffprobe', [
+          '-v', 'error',
+          '-print_format', 'json',
+          '-show_format',
+          fullPath
+        ]);
+        const parsedFormat = JSON.parse(probeResult.stdout || '{}');
+        mediaDuration = Number(parsedFormat?.format?.duration || 0);
+      } catch {}
       const audioTracks = streams
         .filter((s: any) => s.codec_type === 'audio')
         .map((s: any) => ({
@@ -1360,7 +1373,7 @@ async function main() {
           codec: String(s.codec_name || ''),
           url: `/api/files/subtitle/${encodeURIComponent(f.id)}/${Number(s.index)}.vtt`
         }));
-      res.json({ audioTracks, subtitleTracks });
+      res.json({ duration: mediaDuration, audioTracks, subtitleTracks });
     } catch (error: any) {
       res.status(500).send(error?.message || 'Unable to inspect media tracks');
     }
