@@ -725,13 +725,34 @@ export function installQbtProxy(app: Express) {
         const category = String((req.body as any)?.category || 'Downloads');
         let hash = sourceHash;
 
-        if (!hash || !(await torrentExists(hash))) {
-          const hashes = await addTorrentForMetadata(source, category, {
-            authorization: String(req.headers.authorization || ''),
-            cookie: String(req.headers.cookie || ''),
-          });
-          hash = hashes[0];
+        // If qBittorrent already has this magnet, read its files directly.
+        // This avoids an unnecessary /torrents/info -> add cycle and, more
+        // importantly, lets an already-resolved torrent be inspected using
+        // the same /torrents/files request that the UI already proves works.
+        if (hash) {
+          try {
+            const existingFiles = await getFiles(hash);
+            if (existingFiles.length) {
+              rememberPreviewTorrent(source, hash);
+              const mappedFiles = mapInspectFiles(existingFiles);
+              return res.json({
+                name: 'Torrent',
+                hash,
+                files: mappedFiles,
+                totalSize: mappedFiles.reduce((sum: number, f: any) => sum + f.size, 0),
+                source: 'qbt_torrent_files'
+              });
+            }
+          } catch {
+            // The torrent is not resolved yet; continue with the add path.
+          }
         }
+
+        const hashes = await addTorrentForMetadata(source, category, {
+          authorization: String(req.headers.authorization || ''),
+          cookie: String(req.headers.cookie || ''),
+        });
+        hash = hashes[0];
 
         if (hash) rememberPreviewTorrent(source, hash);
 
