@@ -680,6 +680,99 @@ async function prepareBrowserVideo(sourcePath: string): Promise<string> {
   }
 }
 
+async function streamBrowserVideo(sourcePath: string, res: Response, onClose?: () => void): Promise<void> {
+  let probe: any;
+  try {
+    const result = await runCommand('ffprobe', [
+      '-v', 'error',
+      '-print_format', 'json',
+      '-show_streams',
+      sourcePath
+    ]);
+    probe = JSON.parse(result.stdout || '{}');
+  } catch {
+    throw new Error('ffprobe could not analyze this video.');
+  }
+
+  const streams = Array.isArray(probe?.streams) ? probe.streams : [];
+  const video = streams.find((s: any) => s.codec_type === 'video');
+  const audio = streams.find((s: any) => s.codec_type === 'audio');
+  if (!video) throw new Error('No video stream was found in this file.');
+
+  const videoCopySafe =
+    String(video.codec_name || '').toLowerCase() === 'h264' &&
+    ['yuv420p', 'yuvj420p'].includes(String(video.pix_fmt || '').toLowerCase());
+
+  const audioCopySafe = !audio || String(audio.codec_name || '').toLowerCase() === 'aac';
+
+  const args = [
+    '-i', sourcePath,
+    '-map', '0:v:0',
+    ...(audio ? ['-map', '0:a:0?'] : []),
+    '-c:v', videoCopySafe ? 'copy' : 'libx264',
+    ...(videoCopySafe ? [] : [
+      '-preset', 'veryfast',
+      '-crf', '23',
+      '-pix_fmt', 'yuv420p',
+      '-profile:v', 'high',
+      '-level:v', '4.1'
+    ]),
+    ...(audio
+      ? (audioCopySafe
+        ? ['-c:a', 'copy']
+        : ['-c:a', 'aac', '-b:a', '160k', '-ar', '48000'])
+      : []),
+    // Fragmented MP4 can be played directly by the browser as the encoder
+    // produces it, without MediaSource/HLS and without waiting for the entire
+    // file to be transcoded.
+    '-movflags', '+frag_keyframe+empty_moov+default_base_moof',
+    '-f', 'mp4',
+    'pipe:1'
+  ];
+
+  const ffmpeg = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...args], {
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  let stderr = '';
+  ffmpeg.stderr.on('data', chunk => {
+    stderr += chunk.toString();
+    if (stderr.length > 6000) stderr = stderr.slice(-6000);
+  });
+
+  ffmpeg.on('error', error => {
+    console.error('[DIRECT-STREAM] ffmpeg error:', error);
+  });
+
+  ffmpeg.on('close', code => {
+    if (code !== 0 && !res.writableEnded) {
+      console.error('[DIRECT-STREAM] ffmpeg failed:', stderr.trim() || `exit ${code}`);
+      if (!res.headersSent) res.status(502).send('Unable to encode video for browser playback.');
+      else res.end();
+    }
+    onClose?.();
+  });
+
+  res.setHeader('Content-Type', 'video/mp4');
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Accept-Ranges', 'none');
+  res.setHeader('X-SeedFlow-Stream', 'fragmented-mp4');
+
+  reqOnClose(res, () => {
+    if (!ffmpeg.killed) ffmpeg.kill('SIGTERM');
+    onClose?.();
+  });
+
+  ffmpeg.stdout.pipe(res);
+}
+
+function reqOnClose(res: Response, callback: () => void) {
+  const response = res as any;
+  if (response.__seedflowCloseBound) return;
+  response.__seedflowCloseBound = true;
+  res.on('close', callback);
+}
+
 const hlsJobs = new Map<string, Promise<void>>();
 
 async function runCommand(command: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
@@ -1131,7 +1224,27 @@ async function main() {
       return sendFile(req,res,fullPath,false);
     }
 
-    return res.redirect(302, `/api/files/hls/${encodeURIComponent(f.id)}/index.m3u8`);
+    return res.redirect(302, `/api/files/direct-stream/${encodeURIComponent(f.id)}`);
+  });
+
+  app.get('/api/files/direct-stream/:id', async (req,res)=>{
+    const f = scanFiles().find(x => x.id === req.params.id);
+    if (!f || f.type !== 'video') return res.status(404).send('Video not found');
+
+    const fullPath = physicalFromRelative(f.path.slice(1));
+    if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) {
+      return res.status(404).send('Video not found');
+    }
+
+    log('stream','Direct browser video stream',f.path,'info');
+
+    try {
+      await streamBrowserVideo(fullPath, res);
+    } catch (error: any) {
+      console.error('[DIRECT-STREAM] preparation failed:', error);
+      if (!res.headersSent) return res.status(500).send(error?.message || 'Unable to prepare video.');
+      res.end();
+    }
   });
 
   app.get('/api/files/hls/:id/:asset', async (req,res)=>{
@@ -1289,6 +1402,39 @@ async function main() {
     res.json({isExternal:false,host:qbtBase,username:qbtUser,connected,version});
   });
 
+  app.get('/api/torrents/direct-stream/:hash/:index', async (req, res) => {
+    try {
+      const hash = String(req.params.hash || '').trim();
+      const index = Number(req.params.index);
+      if (!hash || !Number.isInteger(index) || index < 0) {
+        return res.status(400).send('Invalid torrent or file index');
+      }
+
+      const list: any[] = await qbtJson('/api/v2/torrents/info?hash=' + encodeURIComponent(hash));
+      const torrent = list?.[0];
+      if (!torrent) return res.status(404).send('Torrent not found');
+
+      const files: any[] = await qbtJson('/api/v2/torrents/files?hash=' + encodeURIComponent(hash));
+      const file = files.find((item: any) => Number(item.index) === index);
+      if (!file) return res.status(404).send('Torrent file not found');
+
+      if (Number(file.priority) <= 0) return res.status(409).send('File is not selected for download');
+      if (Number(file.progress) < 0.999) return res.status(409).send('File is not complete');
+
+      const candidate = resolveQbtDownloadPath(torrent, file);
+      if (!candidate) return res.status(404).send('Downloaded file is not present on server storage');
+
+      const type = fileType(path.basename(candidate));
+      if (type !== 'video') return res.status(415).send('This endpoint is for video files');
+
+      await streamBrowserVideo(candidate, res);
+    } catch (e: any) {
+      console.error('[TORRENT-DIRECT-STREAM]', e?.message || e);
+      if (!res.headersSent) return res.status(502).send(e?.message || 'Unable to stream torrent file');
+      res.end();
+    }
+  });
+
   app.get('/api/torrents/stream/:hash/:index', async (req, res) => {
     try {
       const hash = String(req.params.hash || '').trim();
@@ -1320,7 +1466,7 @@ async function main() {
       }
 
       if (type === 'video') {
-        return res.redirect(302, '/api/files/hls/' + encodeURIComponent(id) + '/index.m3u8');
+        return res.redirect(302, '/api/torrents/direct-stream/' + encodeURIComponent(hash) + '/' + encodeURIComponent(index));
       }
 
       return res.redirect(302, '/api/files/stream/' + encodeURIComponent(id));
