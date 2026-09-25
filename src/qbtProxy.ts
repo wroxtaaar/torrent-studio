@@ -718,50 +718,21 @@ export function installQbtProxy(app: Express) {
           });
         }
 
-        // For a direct magnet, use fetchMetadata only. This does NOT create
-        // a torrent or start a download. The final /torrents/add request
-        // creates the torrent after the user selects files.
-        if (sourceHash && !isHttpSource && !isInternalSearchGrab) {
-          const metadata = await inspectMetadata(source);
-
-          if (!metadata) {
-            return res.status(202).json({
-              name: 'Torrent',
-              hash: sourceHash,
-              files: [],
-              totalSize: 0,
-              source: 'qbt_metadata_pending',
-              pending: true,
-              message: 'qBittorrent is still obtaining the torrent metadata.'
-            });
-          }
-
-          const mappedFiles = mapInspectFiles(metadata.files);
-          return res.json({
-            name: metadata.name,
-            hash: metadata.hash || sourceHash,
-            files: mappedFiles,
-            totalSize: mappedFiles.reduce((sum: number, f: any) => sum + f.size, 0),
-            source: 'qbt_metadata'
-          });
-        }
-
-        // Search results and remote .torrent URLs retain the existing
-        // server-side add-and-inspect flow.
+        // Inspect magnets through the normal qBittorrent torrent API.
+        // If the torrent already exists, read its files directly. Otherwise
+        // add it with MetadataReceived so qBittorrent resolves metadata while
+        // keeping the torrent stopped until the user selects files.
         const category = String((req.body as any)?.category || 'Downloads');
         let hash = sourceHash;
 
         if (!hash || !(await torrentExists(hash))) {
-          const hashes = await addTorrentForMetadata(source, category, {
-            authorization: String(req.headers.authorization || ''),
-            cookie: String(req.headers.cookie || ''),
-          });
+          const hashes = await addTorrentForMetadata(source, category);
           hash = hashes[0];
         }
 
         if (hash) rememberPreviewTorrent(source, hash);
 
-        const files = await waitForTorrentFiles(hash, 30, 1000);
+        const files = await waitForTorrentFiles(hash, 60, 1000);
         if (!files.length) {
           return res.status(202).json({
             name: 'Torrent',
@@ -783,6 +754,7 @@ export function installQbtProxy(app: Express) {
           source: 'qbt_torrent_files'
         });
       }
+
       if (route === '/torrents/upload-torrent' && method === 'POST') {
         const base64 = String((req.body as any)?.base64 || '');
         const filename = String((req.body as any)?.filename || 'upload.torrent');
