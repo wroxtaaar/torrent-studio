@@ -726,7 +726,10 @@ export function installQbtProxy(app: Express) {
         let hash = sourceHash;
 
         if (!hash || !(await torrentExists(hash))) {
-          const hashes = await addTorrentForMetadata(source, category);
+          const hashes = await addTorrentForMetadata(source, category, {
+            authorization: String(req.headers.authorization || ''),
+            cookie: String(req.headers.cookie || ''),
+          });
           hash = hashes[0];
         }
 
