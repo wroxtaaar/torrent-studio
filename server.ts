@@ -1066,8 +1066,7 @@ function getAuthToken(req: Request) {
 }
 function requireAuth(req: Request, res: Response, next: express.NextFunction) {
   if (
-    ['/login','/logout','/api/auth/login','/api/auth/logout','/api/auth/session','/health'].includes(req.path) ||
-    req.path.startsWith('/api/search/torrents/grab/')
+    ['/login','/logout','/api/auth/login','/api/auth/logout','/api/auth/session','/health'].includes(req.path)
   ) return next();
 
   // qbtProxy performs search-result grabs inside the same trusted container.
