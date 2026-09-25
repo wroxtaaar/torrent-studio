@@ -88,3 +88,19 @@ curl http://127.0.0.1:3000/health
 ```
 
 The app image includes FFmpeg/FFprobe, so media streaming does not require installing FFmpeg separately on the VPS.
+
+
+## Public access with login + HTTPS
+
+Torrent Studio is intended to be exposed through the Caddy reverse proxy rather than directly on port 3000. Set these values in the VPS `.env` file:
+
+```dotenv
+APP_USERNAME=admin
+APP_PASSWORD=<long-random-password>
+AUTH_SECRET=<long-random-secret>
+DOMAIN=seedflow.example.com
+```
+
+Create an A record for `DOMAIN` pointing to the Oracle VPS public IP. Open TCP ports 80 and 443 in the Oracle network security rules. Caddy then terminates HTTPS and proxies requests to the private app container.
+
+The app itself listens on `127.0.0.1:3000` on the VPS and qBittorrent/Prowlarr/FlareSolverr stay on the Docker network.
