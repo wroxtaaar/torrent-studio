@@ -114,61 +114,10 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
       };
     }
 
-    if (Hls.isSupported() && !usingDirectFallback) {
-      const hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: false,
-        backBufferLength: 60,
-        maxBufferLength: 30,
-        manifestLoadingTimeOut: 30000,
-        manifestLoadingMaxRetry: 2,
-        manifestLoadingRetryDelay: 750,
-        levelLoadingTimeOut: 30000,
-        levelLoadingMaxRetry: 2,
-        fragLoadingTimeOut: 30000,
-        fragLoadingMaxRetry: 2
-      });
-
-      hlsRef.current = hls;
-
-      hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (!data.fatal) return;
-
-        console.error('[HLS] fatal playback error; switching to direct fragmented MP4:', data);
-
-        if (hlsRef.current === hls) {
-          hls.destroy();
-          hlsRef.current = null;
-        }
-
-        setUsingDirectFallback(true);
-        setMediaError('HLS playback failed. Switching to direct browser playback…');
-
-        media.pause();
-        media.src = directUrl;
-        media.load();
-        media.play().then(() => {
-          setMediaError('');
-          setIsPlaying(true);
-        }).catch(() => {
-          setMediaError('Unable to play this video on this browser.');
-          setIsPlaying(false);
-        });
-      });
-
-      hls.loadSource(file.streamUrl);
-      hls.attachMedia(media);
-
-      return () => {
-        hls.destroy();
-        if (hlsRef.current === hls) hlsRef.current = null;
-        media.pause();
-        media.removeAttribute('src');
-        media.load();
-      };
-    }
-
+    // Use the native fragmented-MP4 stream for in-app playback.
+    // This avoids MediaSource/HLS reset errors on mobile browsers.
     useDirectVideo();
+
 
     return () => {
       media.pause();
@@ -399,7 +348,7 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
                 <span>{formatBytes(file.size)}</span>
                 <span>•</span>
                 <span className="text-emerald-400 font-medium">
-                  {usingDirectFallback ? 'Direct Browser Streaming' : 'Adaptive Streaming'}
+                  Direct Browser Streaming
                 </span>
               </p>
             </div>
@@ -450,9 +399,7 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
               <div className="max-w-md rounded-xl bg-slate-900/95 border border-rose-500/30 p-5">
                 <p className="text-sm font-semibold text-rose-300">{mediaError}</p>
                 <p className="text-xs text-slate-400 mt-2">
-                  {usingDirectFallback
-                    ? 'The VPS is sending a browser-compatible fragmented MP4 stream.'
-                    : 'The VPS prepares a browser-compatible stream automatically.'}
+                  The VPS sends a browser-compatible fragmented MP4 stream.
                 </p>
               </div>
             </div>
