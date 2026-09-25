@@ -157,7 +157,7 @@ export const api = {
     selectedFiles?: number[],
     manifest?: { name: string; size: number; priority: number }[],
     existingHash?: string
-  ): Promise<void> {
+  ): Promise<{ backend?: 'seedr' | 'qbittorrent'; seedrTaskId?: number | null }> {
     const res = await fetch('/api/v2/torrents/add', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -174,6 +174,7 @@ export const api = {
       }
       throw new Error(message || `Failed to add magnet link (${res.status})`);
     }
+    return await res.json().catch(() => ({ backend: 'qbittorrent' }));
   },
 
   async pauseTorrent(hash: string): Promise<void> {
