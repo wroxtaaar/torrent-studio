@@ -540,22 +540,19 @@ async function qbtFetchWithFreshSession(pathname: string, init: RequestInit = {}
 }
 
 async function inspectMetadata(source: string) {
-  // qBittorrent's fetchMetadata endpoint is asynchronous for magnets.
-  // The first request normally returns HTTP 202 + an infohash, not the
-  // file list. Once metadata is cached, a later request returns HTTP 200
-  // with the complete torrent descriptor.
+  // qBittorrent's fetchMetadata resolves a magnet without creating a
+  // downloadable torrent. A fresh SID session is used because this exact
+  // login -> cookie -> fetchMetadata sequence is known to work on 5.2.3.
   for (let i = 0; i < 60; i++) {
-    const params = new URLSearchParams({ source });
     const response = await qbtFetchWithFreshSession('/api/v2/torrents/fetchMetadata', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params,
+      body: new URLSearchParams({ source }),
     });
 
     const text = await response.text();
     console.log(`[QBT-PROXY] fetchMetadata attempt ${i + 1}/60 -> HTTP ${response.status}: ${text.slice(0, 500)}`);
 
-    // 202 is expected while qBittorrent is fetching magnet metadata.
     if (response.status !== 200 && response.status !== 202) {
       throw Object.assign(new Error(text || response.statusText), { status: response.status });
     }
@@ -563,13 +560,38 @@ async function inspectMetadata(source: string) {
     if (text) {
       try {
         const data = JSON.parse(text);
+        const info = data?.info;
 
-        // A completed descriptor contains the torrent name and its files.
-        if (data && (data.name || Array.isArray(data.files))) return data;
+        // qBittorrent 5.2.x returns the completed descriptor under
+        // data.info. Multi-file torrents use info.files; single-file
+        // torrents use info.length + info.name.
+        if (data?.hash && info) {
+          const rawFiles = Array.isArray(info.files)
+            ? info.files.map((file: any, index: number) => ({
+                index,
+                name: Array.isArray(file.path)
+                  ? file.path.map((part: any) => String(part)).join('/')
+                  : String(file.path || `File_${index + 1}`),
+                size: Number(file.length ?? 0),
+                path: Array.isArray(file.path)
+                  ? file.path.map((part: any) => String(part)).join('/')
+                  : String(file.path || `File_${index + 1}`),
+                priority: 0,
+              }))
+            : [{
+                index: 0,
+                name: String(info.name || 'Torrent'),
+                size: Number(info.length ?? 0),
+                path: String(info.name || 'Torrent'),
+                priority: 0,
+              }];
 
-        // HTTP 202 normally contains only v1/v2/id infohash data.
-        // Keep polling the same source until qBittorrent's metadata cache
-        // contains the actual descriptor.
+          return {
+            hash: String(data.hash).toLowerCase(),
+            name: String(info.name || 'Torrent'),
+            files: rawFiles,
+          };
+        }
       } catch {
         // Metadata is still being resolved.
       }
@@ -688,17 +710,45 @@ export function installQbtProxy(app: Express) {
 
         const sourceHash = extractInfoHash(source);
         const isInternalSearchGrab = source.startsWith('/api/search/torrents/grab/');
-        if (!sourceHash && !/^https?:\/\//i.test(source) && !isInternalSearchGrab) {
+        const isHttpSource = /^https?:\/\//i.test(source);
+
+        if (!sourceHash && !isHttpSource && !isInternalSearchGrab) {
           return res.status(400).json({
             error: 'Please provide a valid magnet URI, 40-character torrent hash, or .torrent URL.'
           });
         }
 
-        const category = String((req.body as any)?.category || 'Downloads');
+        // For a direct magnet, use fetchMetadata only. This does NOT create
+        // a torrent or start a download. The final /torrents/add request
+        // creates the torrent after the user selects files.
+        if (sourceHash && !isHttpSource && !isInternalSearchGrab) {
+          const metadata = await inspectMetadata(source);
 
-        // Preview through qBittorrent's normal torrent engine. The torrent is
-        // created with stopCondition=MetadataReceived, so it remains paused and
-        // cannot download anything before the user selects files.
+          if (!metadata) {
+            return res.status(202).json({
+              name: 'Torrent',
+              hash: sourceHash,
+              files: [],
+              totalSize: 0,
+              source: 'qbt_metadata_pending',
+              pending: true,
+              message: 'qBittorrent is still obtaining the torrent metadata.'
+            });
+          }
+
+          const mappedFiles = mapInspectFiles(metadata.files);
+          return res.json({
+            name: metadata.name,
+            hash: metadata.hash || sourceHash,
+            files: mappedFiles,
+            totalSize: mappedFiles.reduce((sum: number, f: any) => sum + f.size, 0),
+            source: 'qbt_metadata'
+          });
+        }
+
+        // Search results and remote .torrent URLs retain the existing
+        // server-side add-and-inspect flow.
+        const category = String((req.body as any)?.category || 'Downloads');
         let hash = sourceHash;
 
         if (!hash || !(await torrentExists(hash))) {
@@ -733,7 +783,6 @@ export function installQbtProxy(app: Express) {
           source: 'qbt_torrent_files'
         });
       }
-
       if (route === '/torrents/upload-torrent' && method === 'POST') {
         const base64 = String((req.body as any)?.base64 || '');
         const filename = String((req.body as any)?.filename || 'upload.torrent');
