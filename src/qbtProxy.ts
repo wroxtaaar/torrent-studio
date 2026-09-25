@@ -760,7 +760,48 @@ export function installQbtProxy(app: Express) {
 
         if (hash) rememberPreviewTorrent(source, hash);
 
-        const files = await waitForTorrentFiles(hash, 60, 1000);
+        let files = await waitForTorrentFiles(hash, 15, 1000);
+
+        // Search/Prowlarr results can resolve to a magnet that qBittorrent
+        // already knows about but whose /torrents/files endpoint is still
+        // unavailable (HTTP 404 while metadata is pending). In that case use
+        // the same fetchMetadata API that qBittorrent 5.2.3 accepts reliably.
+        // This gives the UI the descriptor immediately without treating the
+        // torrent as broken.
+        if (!files.length && isInternalSearchGrab) {
+          try {
+            const grabResponse = await fetch(
+              source.startsWith('/api/search/torrents/grab/')
+                ? internalServerBase + source
+                : source,
+              {
+                headers: {
+                  Accept: 'application/x-bittorrent, application/octet-stream, */*',
+                  ...(req.headers.authorization ? { Authorization: String(req.headers.authorization) } : {}),
+                  ...(req.headers.cookie ? { Cookie: String(req.headers.cookie) } : {}),
+                  ...(config.internalSecret ? { 'X-Torrent-Studio-Internal': config.internalSecret } : {}),
+                },
+              }
+            );
+
+            if (grabResponse.ok) {
+              const grabData = Buffer.from(await grabResponse.arrayBuffer());
+              const resolvedMagnet = grabData.toString('utf8').trim();
+
+              if (/^magnet:\?/i.test(resolvedMagnet)) {
+                const metadata = await inspectMetadata(resolvedMagnet);
+                if (metadata?.files?.length) {
+                  hash = metadata.hash || hash;
+                  rememberPreviewTorrent(source, hash);
+                  files = metadata.files;
+                }
+              }
+            }
+          } catch (error) {
+            console.log('[QBT-PROXY] search metadata fallback failed:', error instanceof Error ? error.message : error);
+          }
+        }
+
         if (!files.length) {
           return res.status(202).json({
             name: 'Torrent',
