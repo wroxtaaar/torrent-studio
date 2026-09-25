@@ -699,94 +699,37 @@ export function installQbtProxy(app: Express) {
 
         const sourceHash = extractInfoHash(source);
         const isInternalSearchGrab = source.startsWith('/api/search/torrents/grab/');
-        const isHttpSource = /^https?:\/\//i.test(source);
-
-        if (!sourceHash && !isHttpSource && !isInternalSearchGrab) {
+        if (!sourceHash && !/^https?:\/\//i.test(source) && !isInternalSearchGrab) {
           return res.status(400).json({
             error: 'Please provide a valid magnet URI, 40-character torrent hash, or .torrent URL.'
           });
         }
 
-        // Inspect magnets through the normal qBittorrent torrent API.
-        // If the torrent already exists, read its files directly. Otherwise
-        // add it with MetadataReceived so qBittorrent resolves metadata while
-        // keeping the torrent stopped until the user selects files.
         const category = String((req.body as any)?.category || 'Downloads');
+
+        // A file list only exists after qBittorrent has a torrent object.
+        // fetchMetadata is useful for caching metadata, but it does not create
+        // a torrent, so /torrents/files can legitimately return 404 for its
+        // returned infohash. For the selection UI we therefore create/reuse
+        // the torrent paused, then read its authoritative file list.
         let hash = sourceHash;
 
-        // If qBittorrent already has this magnet, read its files directly.
-        // This avoids an unnecessary /torrents/info -> add cycle and, more
-        // importantly, lets an already-resolved torrent be inspected using
-        // the same /torrents/files request that the UI already proves works.
-        if (hash) {
-          try {
-            const existingFiles = await getFiles(hash);
-            if (existingFiles.length) {
-              rememberPreviewTorrent(source, hash);
-              const mappedFiles = mapInspectFiles(existingFiles);
-              return res.json({
-                name: 'Torrent',
-                hash,
-                files: mappedFiles,
-                totalSize: mappedFiles.reduce((sum: number, f: any) => sum + f.size, 0),
-                source: 'qbt_torrent_files'
-              });
-            }
-          } catch {
-            // The torrent is not resolved yet; continue with the add path.
-          }
+        if (hash && await torrentExists(hash)) {
+          // Reuse an existing torrent without changing its current state.
+        } else {
+          const hashes = await addTorrentForMetadata(source, category);
+          hash = hashes[0];
         }
 
-        const hashes = await addTorrentForMetadata(source, category, {
-          authorization: String(req.headers.authorization || ''),
-          cookie: String(req.headers.cookie || ''),
-        });
-        hash = hashes[0];
-
-        if (hash) rememberPreviewTorrent(source, hash);
-
-        let files = await waitForTorrentFiles(hash, 15, 1000);
-
-        // Search/Prowlarr results can resolve to a magnet that qBittorrent
-        // already knows about but whose /torrents/files endpoint is still
-        // unavailable (HTTP 404 while metadata is pending). In that case use
-        // the same fetchMetadata API that qBittorrent 5.2.3 accepts reliably.
-        // This gives the UI the descriptor immediately without treating the
-        // torrent as broken.
-        if (!files.length && isInternalSearchGrab) {
-          try {
-            const grabResponse = await fetch(
-              source.startsWith('/api/search/torrents/grab/')
-                ? internalServerBase + source
-                : source,
-              {
-                headers: {
-                  Accept: 'application/x-bittorrent, application/octet-stream, */*',
-                  ...(req.headers.authorization ? { Authorization: String(req.headers.authorization) } : {}),
-                  ...(req.headers.cookie ? { Cookie: String(req.headers.cookie) } : {}),
-                  ...(config.internalSecret ? { 'X-Torrent-Studio-Internal': config.internalSecret } : {}),
-                },
-              }
-            );
-
-            if (grabResponse.ok) {
-              const grabData = Buffer.from(await grabResponse.arrayBuffer());
-              const resolvedMagnet = grabData.toString('utf8').trim();
-
-              if (/^magnet:\?/i.test(resolvedMagnet)) {
-                const metadata = await inspectMetadata(resolvedMagnet);
-                if (metadata?.files?.length) {
-                  hash = metadata.hash || hash;
-                  rememberPreviewTorrent(source, hash);
-                  files = metadata.files;
-                }
-              }
-            }
-          } catch (error) {
-            console.log('[QBT-PROXY] search metadata fallback failed:', error instanceof Error ? error.message : error);
-          }
+        if (!hash) {
+          return res.status(502).json({
+            error: 'qBittorrent accepted the torrent but did not provide a hash.'
+          });
         }
 
+        rememberPreviewTorrent(source, hash);
+
+        const files = await waitForTorrentFiles(hash, 30, 1000);
         if (!files.length) {
           return res.status(202).json({
             name: 'Torrent',
@@ -800,8 +743,16 @@ export function installQbtProxy(app: Express) {
         }
 
         const mappedFiles = mapInspectFiles(files);
+        let name = 'Torrent';
+        try {
+          const info = await qbtJson('/api/v2/torrents/info?hash=' + encodeURIComponent(hash));
+          if (Array.isArray(info) && info[0]?.name) name = String(info[0].name);
+        } catch {
+          // File metadata is sufficient for the selection UI.
+        }
+
         return res.json({
-          name: 'Torrent',
+          name,
           hash,
           files: mappedFiles,
           totalSize: mappedFiles.reduce((sum: number, f: any) => sum + f.size, 0),
