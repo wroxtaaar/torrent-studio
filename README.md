@@ -6,11 +6,13 @@ Torrent Studio is a self-hosted web UI for a real qBittorrent instance. Everythi
 
 Browser → Torrent Studio (Node/Express) → qBittorrent → `./downloads`
 
+For completed video files, Torrent Studio can stream a browser-compatible H.264/AAC fragmented MP4 through the Node server; FFmpeg is included in the app image.
+
 No Render, Cloud Run, or external qBittorrent service is required.
 
 ## Docker deployment
 
-The repository includes a Docker Compose stack for the Oracle VPS. It runs the app and qBittorrent on the same Docker network, so the backend connects to qBittorrent at `http://qbittorrent:8080`.
+The repository includes a complete Docker Compose stack for the Oracle VPS. It runs Torrent Studio, qBittorrent, Prowlarr, and the FlareSolverr proxy/core on one private Docker network. The backend connects to qBittorrent at `http://qbittorrent:8080` and Prowlarr at `http://prowlarr:9696`.
 
 Downloaded data is shared through the host's `./downloads` directory.
 
@@ -36,7 +38,7 @@ Set a strong qBittorrent admin password. Do not commit `.env`.
 docker compose up -d --build
 ```
 
-The web app is available on port `3000` and qBittorrent's WebUI is kept private inside the Docker network.
+The web app is available on port `3000`. qBittorrent's WebUI, Prowlarr, and FlareSolverr are kept private to the Docker network (Prowlarr is bound to localhost on the VPS for administration).
 
 ### 4. Check status
 
@@ -73,3 +75,16 @@ The Add Magnet dialog sends selected file indexes to the backend. The backend pa
 - Keep qBittorrent's WebUI port private; users interact with it through Torrent Studio.
 - If you want to access Torrent Studio from the internet, put HTTPS/authentication in front of port 3000 rather than exposing qBittorrent's WebUI directly.
 - Torrent data persists in `./downloads` and qBittorrent configuration persists in `./qbittorrent-config`.
+
+### Production update
+
+From an existing checkout:
+
+```bash
+git pull origin main
+docker compose up -d --build --force-recreate
+docker compose ps
+curl http://127.0.0.1:3000/health
+```
+
+The app image includes FFmpeg/FFprobe, so media streaming does not require installing FFmpeg separately on the VPS.
