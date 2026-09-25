@@ -453,7 +453,7 @@ function mapInspectFiles(files: any[]) {
   });
 }
 
-async function waitForTorrentFiles(hash: string, attempts = 60, delayMs = 2000): Promise<any[]> {
+async function waitForTorrentFiles(hash: string, attempts = 90, delayMs = 1000): Promise<any[]> {
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
       const files = await getFiles(hash);
