@@ -12,6 +12,8 @@ import {
   Download,
   Copy,
   Check,
+  Captions,
+  Languages,
   Music,
   Video,
   X,
@@ -43,6 +45,18 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [mediaError, setMediaError] = useState('');
+  const [audioTracks, setAudioTracks] = useState<Array<{
+    index: number; language: string; title: string; codec: string; channels: number; default: boolean;
+  }>>([]);
+  const [subtitleTracks, setSubtitleTracks] = useState<Array<{
+    index: number; language: string; title: string; codec: string; url: string;
+  }>>([]);
+  const [selectedAudioIndex, setSelectedAudioIndex] = useState<number | undefined>(undefined);
+  const [selectedSubtitleIndex, setSelectedSubtitleIndex] = useState<number | undefined>(undefined);
+  const [trackNotice, setTrackNotice] = useState('');
+  const resumeTimeRef = useRef(0);
+  const resumePlayingRef = useRef(false);
+  const subtitleTrackRef = useRef<HTMLTrackElement>(null);
   const [usingDirectFallback, setUsingDirectFallback] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -65,55 +79,78 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
     if (!media || !file) return;
 
     setMediaError('');
-    setUsingDirectFallback(false);
 
-    const directUrl = file.streamUrl.includes('/api/torrents/stream/')
+    const directBaseUrl = file.streamUrl.includes('/api/torrents/stream/')
       ? file.streamUrl.replace('/api/torrents/stream/', '/api/torrents/direct-stream/')
-      : file.streamUrl.includes('/api/files/hls/')
-      ? file.streamUrl.replace('/api/files/hls/', '/api/files/direct-stream/').replace(/\/index\.m3u8$/, '')
       : file.streamUrl;
 
-    const useDirectVideo = () => {
-      setUsingDirectFallback(true);
-      setMediaError('');
-      media.pause();
-      media.src = directUrl;
-      media.load();
-      media.play().then(() => setIsPlaying(true)).catch(() => {});
+    const streamUrl = selectedAudioIndex !== undefined
+      ? `${directBaseUrl}${directBaseUrl.includes('?') ? '&' : '?'}audio=${encodeURIComponent(String(selectedAudioIndex))}`
+      : directBaseUrl;
+
+    const restoreTime = resumeTimeRef.current;
+    const restorePlaying = resumePlayingRef.current || (!media.paused && duration > 0);
+
+    const handleLoaded = () => {
+      if (Number.isFinite(restoreTime) && restoreTime > 0 && Number.isFinite(media.duration)) {
+        const safeTime = Math.min(restoreTime, Math.max(0, media.duration - 0.25));
+        try {
+          media.currentTime = safeTime;
+          setCurrentTime(safeTime);
+        } catch {}
+      }
+
+      setTrackNotice('');
+      if (restorePlaying) {
+        media.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
+      }
     };
 
+    media.addEventListener('loadedmetadata', handleLoaded, { once: true });
+    media.src = streamUrl;
+    media.load();
+
     if (!isVideo) {
-      media.src = file.streamUrl;
-      media.load();
-      return () => {
-        media.pause();
-        media.removeAttribute('src');
-        media.load();
-      };
+      media.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
     }
-
-    // Prefer native HLS on browsers that provide it.
-    if (media.canPlayType('application/vnd.apple.mpegurl') && !usingDirectFallback) {
-      media.src = file.streamUrl;
-      media.load();
-      return () => {
-        media.pause();
-        media.removeAttribute('src');
-        media.load();
-      };
-    }
-
-    // Use the native fragmented-MP4 stream for in-app playback.
-    // This avoids MediaSource/HLS reset errors on mobile browsers.
-    useDirectVideo();
-
 
     return () => {
+      media.removeEventListener('loadedmetadata', handleLoaded);
       media.pause();
       media.removeAttribute('src');
       media.load();
     };
+  }, [file?.id, file?.streamUrl, isVideo, selectedAudioIndex]);
+
+  useEffect(() => {
+    if (!file || !isVideo) return;
+
+    const mediaInfoUrl = file.streamUrl.includes('/api/torrents/')
+      ? (() => {
+          const match = file.streamUrl.match(/\/api\/torrents\/(?:stream|direct-stream)\/([^/]+)\/(\d+)/);
+          return match ? `/api/torrents/media-info/${match[1]}/${match[2]}` : '';
+        })()
+      : `/api/files/media-info/${encodeURIComponent(file.id)}`;
+
+    if (!mediaInfoUrl) return;
+
+    let cancelled = false;
+    fetch(mediaInfoUrl)
+      .then(response => response.ok ? response.json() : null)
+      .then(data => {
+        if (cancelled || !data) return;
+        setAudioTracks(Array.isArray(data.audioTracks) ? data.audioTracks : []);
+        setSubtitleTracks(Array.isArray(data.subtitleTracks) ? data.subtitleTracks : []);
+      })
+      .catch(error => console.warn('[MEDIA] track metadata unavailable:', error));
+
+    return () => { cancelled = true; };
   }, [file?.id, file?.streamUrl, isVideo]);
+
+  useEffect(() => {
+    const track = subtitleTrackRef.current?.track;
+    if (track) track.mode = selectedSubtitleIndex === undefined ? 'disabled' : 'showing';
+  }, [selectedSubtitleIndex, subtitleTracks]);
 
   if (!file) return null;
 
@@ -171,6 +208,26 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
       mediaRef.current.volume = 0;
       setIsMuted(true);
     }
+  };
+
+  const handleAudioTrackChange = (value: string) => {
+    const next = Number(value);
+    if (!Number.isInteger(next)) return;
+
+    const media = mediaRef.current;
+    resumeTimeRef.current = media?.currentTime || currentTime || 0;
+    resumePlayingRef.current = Boolean(media && !media.paused);
+    setTrackNotice('Preparing selected audio…');
+    setSelectedAudioIndex(next);
+  };
+
+  const handleSubtitleTrackChange = (value: string) => {
+    if (value === 'off') {
+      setSelectedSubtitleIndex(undefined);
+      return;
+    }
+    const next = Number(value);
+    if (Number.isInteger(next)) setSelectedSubtitleIndex(next);
   };
 
   // Speed
@@ -401,8 +458,19 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
               onTimeUpdate={onTimeUpdate}
               onLoadedMetadata={onLoadedMetadata}
               onEnded={() => setIsPlaying(false)}
-              onError={handleMediaError}
-            />
+              onError={handleMediaError}>
+              {selectedSubtitleIndex !== undefined && (
+                <track
+                  ref={subtitleTrackRef}
+                  key={selectedSubtitleIndex}
+                  kind="subtitles"
+                  src={subtitleTracks.find(track => track.index === selectedSubtitleIndex)?.url}
+                  srcLang={subtitleTracks.find(track => track.index === selectedSubtitleIndex)?.language || 'en'}
+                  label={subtitleTracks.find(track => track.index === selectedSubtitleIndex)?.title || subtitleTracks.find(track => track.index === selectedSubtitleIndex)?.language?.toUpperCase() || 'Subtitles'}
+                  default
+                />
+              )}
+            </video>
           ) : (
             <div className="flex flex-col items-center justify-center p-8 text-center gap-4">
               <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 animate-pulse-subtle">
@@ -509,7 +577,48 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
             </div>
 
             {/* Right: Speed, PiP, Fullscreen */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              {audioTracks.length > 1 && (
+                <label className="flex items-center gap-1.5 bg-slate-800/80 rounded-lg px-2 py-1.5">
+                  <Languages className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <select
+                    value={selectedAudioIndex !== undefined ? selectedAudioIndex : (audioTracks[0]?.index ?? '')}
+                    onChange={(e) => handleAudioTrackChange(e.target.value)}
+                    className="bg-transparent text-[11px] text-slate-200 outline-none max-w-[130px]"
+                    title="Audio track"
+                  >
+                    {audioTracks.map((track, index) => (
+                      <option key={track.index} value={track.index}>
+                        {track.title || track.language?.toUpperCase() || `Audio ${index + 1}`}{track.default ? ' · Default' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
+              {subtitleTracks.length > 0 && (
+                <label className="flex items-center gap-1.5 bg-slate-800/80 rounded-lg px-2 py-1.5">
+                  <Captions className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <select
+                    value={selectedSubtitleIndex !== undefined ? selectedSubtitleIndex : 'off'}
+                    onChange={(e) => handleSubtitleTrackChange(e.target.value)}
+                    className="bg-transparent text-[11px] text-slate-200 outline-none max-w-[130px]"
+                    title="Subtitles"
+                  >
+                    <option value="off">Subtitles Off</option>
+                    {subtitleTracks.map((track, index) => (
+                      <option key={track.index} value={track.index}>
+                        {track.title || track.language?.toUpperCase() || `Subtitle ${index + 1}`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
+              {trackNotice && (
+                <span className="text-[10px] text-cyan-400 max-w-[140px] truncate">{trackNotice}</span>
+              )}
+
               {/* Playback Speed selector */}
               <div className="flex items-center bg-slate-800/80 rounded-lg p-0.5 text-xs font-medium text-slate-300">
                 {[0.75, 1, 1.25, 1.5, 2].map((s) => (
