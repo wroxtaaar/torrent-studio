@@ -429,7 +429,17 @@ async function searchTorrentIndexer(query: string, limit = 50, offset = 0) {
       .map((release: any) => {
         const magnetUrl = String(release.magnetUrl || release.magneturl || '').trim();
         const downloadUrl = String(release.downloadUrl || release.downloadurl || '').trim();
-        const sourceUrl = magnetUrl || (
+        const infoHash = String(release.infoHash || release.infohash || '').trim().toLowerCase();
+
+        // Prefer a real magnet. If Prowlarr only supplies a protected
+        // downloadUrl, use the infohash as a direct magnet before falling
+        // back to the server-side grab endpoint. This avoids routing the Add
+        // flow through an indexer download URL that may require a separate
+        // authentication context.
+        const infoHashMagnet = /^[a-f0-9]{40}$/i.test(infoHash)
+          ? `magnet:?xt=urn:btih:${infoHash}`
+          : '';
+        const sourceUrl = magnetUrl || infoHashMagnet || (
           downloadUrl
             ? createTorrentSearchGrab(downloadUrl, query, String(release.guid || ''))
             : ''
