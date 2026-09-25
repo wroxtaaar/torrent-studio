@@ -1,7 +1,7 @@
 import bencode from 'bencode';
 import crypto from 'crypto';
 import type { Express, Request, Response, NextFunction } from 'express';
-import { addSeedrTask, canUseSeedr, listSeedrTasks, isSeedrConfigured, seedrMaxSizeBytes } from './seedr.ts';
+import { addSeedrTask, canUseSeedr, isSeedrConfigured, seedrMaxSizeBytes } from './seedr.ts';
 
 type QbtConfig = {
   baseUrl: string;
