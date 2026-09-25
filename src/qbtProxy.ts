@@ -728,6 +728,8 @@ export function installQbtProxy(app: Express) {
         }
 
         const category = String((req.body as any)?.category || 'Downloads');
+        const appAuthHeader = String(req.headers.authorization || '');
+        const appCookie = String(req.headers.cookie || '');
 
         // Search results are represented by a protected server-side grab URL.
         // Resolve it first. If Prowlarr redirects/returns a magnet, inspect that
@@ -812,7 +814,7 @@ export function installQbtProxy(app: Express) {
           }
         }
 
-        const hashes = await addTorrentForMetadata(source, category);
+        const hashes = await addTorrentForMetadata(source, category, appAuthHeader, appCookie);
         hash = hashes[0];
 
         if (!hash) {
