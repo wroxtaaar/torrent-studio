@@ -106,10 +106,14 @@ async function qbtFetchOnce(pathname: string, init: RequestInit = {}, cookieOver
 
   if (config.apiKey) {
     headers.set('Authorization', `Bearer ${config.apiKey}`);
+  } else if (config.username && config.password && !cookieOverride) {
+    // qBittorrent 5.2+ supports Basic authentication. Use it directly so
+    // this proxy does not share/invalidate a QBT_SID with the legacy qbt
+    // client in server.ts. The manual in-container test confirmed that the
+    // same credentials work against qBittorrent.
+    const basic = Buffer.from(`${config.username}:${config.password}`).toString('base64');
+    headers.set('Authorization', `Basic ${basic}`);
   } else {
-    // qBittorrent 5.2.3 reliably accepts the QBT_SID cookie returned by the
-    // login endpoint. Prefer that cookie for API requests; Basic auth is only
-    // used by qBittorrent as a way to establish a session when no cookie exists.
     const cookie = cookieOverride || qbtSessionCookie;
     if (cookie) headers.set('Cookie', cookie);
   }
