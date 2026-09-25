@@ -1045,11 +1045,17 @@ function authVerify(token: string): { username: string; expiresAt: number } | nu
     return { username: String(parsed.username), expiresAt: Number(parsed.expiresAt) };
   } catch { return null; }
 }
-function setAuthCookie(res: Response, token: string) {
-  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=${AUTH_TTL_SECONDS}; HttpOnly; Secure; SameSite=Lax`);
+function cookieSecure(req: Request) {
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  return req.secure || forwardedProto === 'https';
 }
-function clearAuthCookie(res: Response) {
-  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`);
+function setAuthCookie(req: Request, res: Response, token: string) {
+  const secure = cookieSecure(req) ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=${AUTH_TTL_SECONDS}; HttpOnly${secure}; SameSite=Lax`);
+}
+function clearAuthCookie(req: Request, res: Response) {
+  const secure = cookieSecure(req) ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=; Path=/; Max-Age=0; HttpOnly${secure}; SameSite=Lax`);
 }
 function getAuthToken(req: Request) {
   const auth = String(req.headers.authorization || '');
@@ -1121,8 +1127,8 @@ async function main() {
     if(!session) return res.status(401).json({authenticated:false});
     res.json({authenticated:true,username:session.username,expiresAt:session.expiresAt});
   });
-  app.post('/api/auth/logout',(_req,res)=>{ clearAuthCookie(res); res.json({ok:true}); });
-  app.get('/logout',(_req,res)=>{ clearAuthCookie(res); res.redirect('/login'); });
+  app.post('/api/auth/logout',(_req,res)=>{ clearAuthCookie(req, res); res.json({ok:true}); });
+  app.get('/logout',(_req,res)=>{ clearAuthCookie(req, res); res.redirect('/login'); });
   app.use(requireAuth);
 
   installQbtProxy(app);
