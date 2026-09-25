@@ -79,6 +79,7 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
     if (!media || !file) return;
 
     setMediaError('');
+    setTrackNotice('Preparing browser stream…');
 
     const directBaseUrl = file.streamUrl.includes('/api/torrents/stream/')
       ? file.streamUrl.replace('/api/torrents/stream/', '/api/torrents/direct-stream/')
@@ -279,7 +280,12 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
   const onLoadedMetadata = () => {
     if (mediaRef.current) {
       setDuration(mediaRef.current.duration || file.duration || 600);
-      mediaRef.current.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
+
+      if (resumePlayingRef.current) {
+        mediaRef.current.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
+      } else {
+        setIsPlaying(false);
+      }
     }
   };
 
