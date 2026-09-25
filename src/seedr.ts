@@ -21,8 +21,11 @@ async function seedrRequest(path: string, init: RequestInit = {}): Promise<any> 
   headers.set('Authorization', `Bearer ${token}`);
   headers.set('Accept', 'application/json');
 
+  console.log(`[SEEDR] ${init.method || 'GET'} ${path}`);
   const response = await fetch(SEEDR_BASE_URL + path, { ...init, headers });
   const text = await response.text();
+  console.log(`[SEEDR] Response: ${response.status}`);
+  if (!response.ok) console.warn(`[SEEDR] Error body: ${text.slice(0, 2000)}`);
   let data: any = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = text; }
 
