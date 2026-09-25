@@ -20,7 +20,6 @@ import {
 } from 'lucide-react';
 import { StorageFile } from '../types/index.ts';
 import { formatBytes, formatDuration } from '../utils/formatters.ts';
-import Hls from 'hls.js';
 
 interface MediaPlayerModalProps {
   file: StorageFile | null;
@@ -49,7 +48,6 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const hlsRef = useRef<Hls | null>(null);
 
   const isVideo = file?.type === 'video';
   const mediaRef = isVideo ? videoRef : audioRef;
@@ -69,11 +67,6 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
     setMediaError('');
     setUsingDirectFallback(false);
 
-    if (hlsRef.current) {
-      hlsRef.current.destroy();
-      hlsRef.current = null;
-    }
-
     const directUrl = file.streamUrl.includes('/api/torrents/stream/')
       ? file.streamUrl.replace('/api/torrents/stream/', '/api/torrents/direct-stream/')
       : file.streamUrl.includes('/api/files/hls/')
@@ -83,10 +76,6 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
     const useDirectVideo = () => {
       setUsingDirectFallback(true);
       setMediaError('');
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
       media.pause();
       media.src = directUrl;
       media.load();
