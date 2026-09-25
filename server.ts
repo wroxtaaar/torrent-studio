@@ -17,6 +17,11 @@ import type {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PORT = Number(process.env.PORT) || 3000;
+const APP_USERNAME = process.env.APP_USERNAME || 'admin';
+const APP_PASSWORD = process.env.APP_PASSWORD || '';
+const AUTH_SECRET = process.env.AUTH_SECRET || '';
+const AUTH_COOKIE = 'seedflow_session';
+const AUTH_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 const STORAGE_DIR = path.resolve(process.env.STORAGE_DIR || path.join(__dirname, 'storage'));
 const defaultDownloadsDir = fs.existsSync(path.resolve(process.cwd(), 'downloads'))
@@ -1009,11 +1014,92 @@ function sendFile(req: Request, res: Response, fullPath: string, download: boole
   fs.createReadStream(fullPath,{start,end}).pipe(res);
 }
 
+function authSign(payload: string) {
+  return crypto.createHmac('sha256', AUTH_SECRET).update(payload).digest('base64url');
+}
+function authToken(username: string, expiresAt: number) {
+  const payload = Buffer.from(JSON.stringify({ username, expiresAt }), 'utf8').toString('base64url');
+  return `${payload}.${authSign(payload)}`;
+}
+function authVerify(token: string): { username: string; expiresAt: number } | null {
+  try {
+    const [payload, signature] = token.split('.');
+    if (!payload || !signature || !AUTH_SECRET) return null;
+    const expected = authSign(payload);
+    const a = Buffer.from(signature), b = Buffer.from(expected);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (!parsed?.username || Number(parsed.expiresAt) <= Math.floor(Date.now()/1000)) return null;
+    return { username: String(parsed.username), expiresAt: Number(parsed.expiresAt) };
+  } catch { return null; }
+}
+function setAuthCookie(res: Response, token: string) {
+  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=${AUTH_TTL_SECONDS}; HttpOnly; Secure; SameSite=Lax`);
+}
+function clearAuthCookie(res: Response) {
+  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`);
+}
+function getAuthToken(req: Request) {
+  const auth = String(req.headers.authorization || '');
+  if (/^Bearer /i.test(auth)) return auth.slice(7).trim();
+  const token = String(req.headers.cookie || '').split(';').map(s=>s.trim())
+    .find(s=>s.startsWith(AUTH_COOKIE + '='));
+  return token ? decodeURIComponent(token.slice(AUTH_COOKIE.length + 1)) : '';
+}
+function requireAuth(req: Request, res: Response, next: express.NextFunction) {
+  if (['/login','/logout','/api/auth/login','/api/auth/logout','/api/auth/session','/health'].includes(req.path)) return next();
+  const session = authVerify(getAuthToken(req));
+  if (session) { (req as any).user = session; return next(); }
+  if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Authentication required.' });
+  return res.redirect('/login');
+}
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'} as Record<string,string>)[ch] || ch);
+}
+function loginPage(message='') {
+  const error = message ? `<div style="padding:10px;border-radius:10px;background:#450a0a;border:1px solid #7f1d1d;color:#fda4af;margin-bottom:14px;font-size:13px">${escapeHtml(message)}</div>` : '';
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SeedFlow Login</title><style>body{margin:0;min-height:100vh;background:#020617;color:#e2e8f0;font-family:system-ui,-apple-system,sans-serif;display:grid;place-items:center;padding:20px}.card{width:min(400px,100%);padding:28px;background:#0f172a;border:1px solid #334155;border-radius:18px;box-shadow:0 24px 80px #0008}h1{margin:10px 0 6px;font-size:25px}p{color:#94a3b8;margin:0 0 22px}label{display:block;margin:14px 0 7px;font-size:13px;font-weight:700}input{width:100%;box-sizing:border-box;padding:13px;border-radius:11px;border:1px solid #334155;background:#020617;color:#e2e8f0;font-size:16px}button{width:100%;margin-top:20px;padding:13px;border:0;border-radius:11px;background:#06b6d4;color:#082f49;font-weight:800;font-size:16px;cursor:pointer}</style></head><body><main class="card"><div style="font-size:12px;font-weight:800;letter-spacing:.08em;color:#67e8f9">SEEDFLOW</div><h1>Sign in</h1><p>Sign in to access your Torrent Studio server.</p>${error}<form method="post" action="/login"><label>Username</label><input name="username" autocomplete="username" required autofocus><label>Password</label><input name="password" type="password" autocomplete="current-password" required><button type="submit">Login</button></form></main></body></html>`;
+}
+
 async function main() {
   const app = express();
   app.use(express.json({ limit: '100mb' }));
   app.use(express.urlencoded({ extended: true }));
   app.use((_req,res,next)=>{ res.setHeader('X-Powered-By','Torrent-Studio'); next(); });
+
+  if (!APP_PASSWORD) throw new Error('APP_PASSWORD is required.');
+  if (!AUTH_SECRET) throw new Error('AUTH_SECRET is required.');
+
+  app.get('/login', (req,res) => {
+    if (authVerify(getAuthToken(req))) return res.redirect('/');
+    res.setHeader('Cache-Control','no-store');
+    res.type('html').send(loginPage());
+  });
+  app.post('/login', (req,res) => {
+    const username=String(req.body?.username||''), password=String(req.body?.password||'');
+    const sameLength=Buffer.byteLength(password)===Buffer.byteLength(APP_PASSWORD);
+    const valid=username===APP_USERNAME && sameLength && crypto.timingSafeEqual(Buffer.from(password),Buffer.from(APP_PASSWORD));
+    if(!valid) return res.status(401).type('html').send(loginPage('Invalid username or password.'));
+    setAuthCookie(res,authToken(APP_USERNAME,Math.floor(Date.now()/1000)+AUTH_TTL_SECONDS));
+    res.redirect('/');
+  });
+  app.post('/api/auth/login',(req,res)=>{
+    const username=String(req.body?.username||''), password=String(req.body?.password||'');
+    const sameLength=Buffer.byteLength(password)===Buffer.byteLength(APP_PASSWORD);
+    const valid=username===APP_USERNAME && sameLength && crypto.timingSafeEqual(Buffer.from(password),Buffer.from(APP_PASSWORD));
+    if(!valid) return res.status(401).json({error:'Invalid username or password.'});
+    const expiresAt=Math.floor(Date.now()/1000)+AUTH_TTL_SECONDS;
+    setAuthCookie(res,authToken(APP_USERNAME,expiresAt));
+    res.json({ok:true,username:APP_USERNAME,expiresAt});
+  });
+  app.get('/api/auth/session',(req,res)=>{
+    const session=authVerify(getAuthToken(req));
+    if(!session) return res.status(401).json({authenticated:false});
+    res.json({authenticated:true,username:session.username,expiresAt:session.expiresAt});
+  });
+  app.post('/api/auth/logout',(_req,res)=>{ clearAuthCookie(res); res.json({ok:true}); });
+  app.get('/logout',(_req,res)=>{ clearAuthCookie(res); res.redirect('/login'); });
+  app.use(requireAuth);
 
   installQbtProxy(app);
 
