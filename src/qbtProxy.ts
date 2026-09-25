@@ -107,13 +107,9 @@ async function qbtFetchOnce(pathname: string, init: RequestInit = {}, cookieOver
   if (config.apiKey) {
     headers.set('Authorization', `Bearer ${config.apiKey}`);
   } else if (config.username && config.password && !cookieOverride) {
-    // qBittorrent 5.2+ supports Basic authentication. Use it directly so
-    // this proxy does not share/invalidate a QBT_SID with the legacy qbt
-    // client in server.ts. The manual in-container test confirmed that the
-    // same credentials work against qBittorrent.
-    const basic = Buffer.from(`${config.username}:${config.password}`).toString('base64');
-    headers.set('Authorization', `Basic ${basic}`);
-  } else {
+    // Use the same cookie-based WebAPI session that the verified
+    // qBittorrent 5.2.3 in-container test uses. Keep this proxy's session
+    // isolated from any other qBittorrent client.
     const cookie = cookieOverride || qbtSessionCookie;
     if (cookie) headers.set('Cookie', cookie);
   }
@@ -787,30 +783,28 @@ export function installQbtProxy(app: Express) {
         let hash = sourceHash;
 
         if (hash && await torrentExists(hash)) {
-          // Reuse an existing torrent only when its actual file list is
-          // available. Metadata-only entries are not considered ready.
-          try {
-            const existingFiles = await getFiles(hash);
-            if (existingFiles.length) {
-              rememberPreviewTorrent(source, hash);
-              const mappedFiles = mapInspectFiles(existingFiles);
-              let name = 'Torrent';
-              try {
-                const info = await qbtJson('/api/v2/torrents/info?hash=' + encodeURIComponent(hash));
-                if (Array.isArray(info) && info[0]?.name) name = String(info[0].name);
-              } catch {
-                // File metadata is enough for the selection UI.
-              }
-              return res.json({
-                name,
-                hash,
-                files: mappedFiles,
-                totalSize: mappedFiles.reduce((sum: number, f: any) => sum + f.size, 0),
-                source: 'qbt_torrent_files'
-              });
+          // If qBittorrent already has the torrent and its file list is ready,
+          // return it immediately. This avoids unnecessary metadata POSTs and
+          // is also the safest path after the user previously previewed/added
+          // the same magnet.
+          const existingFiles = await getFiles(hash);
+          if (existingFiles.length) {
+            rememberPreviewTorrent(source, hash);
+            const mappedFiles = mapInspectFiles(existingFiles);
+            let name = 'Torrent';
+            try {
+              const info = await qbtJson('/api/v2/torrents/info?hash=' + encodeURIComponent(hash));
+              if (Array.isArray(info) && info[0]?.name) name = String(info[0].name);
+            } catch {
+              // File metadata is enough for the selection UI.
             }
-          } catch {
-            // Existing metadata-only/stale entry; continue with the normal add path.
+            return res.json({
+              name,
+              hash,
+              files: mappedFiles,
+              totalSize: mappedFiles.reduce((sum: number, f: any) => sum + f.size, 0),
+              source: 'qbt_torrent_files'
+            });
           }
         }
 
