@@ -644,15 +644,41 @@ export function installQbtProxy(app: Express) {
 
         const category = String((req.body as any)?.category || 'Downloads');
 
-        // The preview flow intentionally creates or reuses the torrent PAUSED.
-        // That lets qBittorrent resolve metadata through its normal torrent
-        // engine, while guaranteeing nothing starts before the user selects files.
+        // Magnet inspection must use qBittorrent's fetchMetadata endpoint.
+        // Do NOT add the magnet to /torrents/add during preview: fetchMetadata
+        // resolves the metadata without creating a download, while the final
+        // /torrents/add happens only after the user selects files.
+        if (sourceHash && !isInternalSearchGrab && !/^https?:\/\//i.test(source)) {
+          const metadata = await inspectMetadata(source);
+          if (!metadata) {
+            return res.status(202).json({
+              name: 'Torrent',
+              hash: sourceHash,
+              files: [],
+              totalSize: 0,
+              source: 'qbt_metadata_pending',
+              pending: true,
+              message: 'qBittorrent is still obtaining the torrent metadata.'
+            });
+          }
+
+          const rawFiles = Array.isArray(metadata.files) ? metadata.files : [];
+          const mappedFiles = mapInspectFiles(rawFiles);
+          return res.json({
+            name: metadata.name || 'Torrent',
+            hash: sourceHash,
+            files: mappedFiles,
+            totalSize: mappedFiles.reduce((sum: number, f: any) => sum + f.size, 0),
+            source: 'qbt_metadata'
+          });
+        }
+
+        // Search results / remote .torrent URLs still use the existing
+        // server-side add-and-inspect path. The actual torrent is created
+        // paused so nothing downloads before file selection.
         let hash = sourceHash;
         if (hash && await torrentExists(hash)) {
-          // This torrent already exists. Do not stop or reset an active
-          // download just because the user opened it from Search again.
-          // Newly-added torrents are handled by addTorrentForMetadata and
-          // remain paused until the user confirms file selection.
+          // Reuse an existing torrent without changing its current state.
         } else {
           const hashes = await addTorrentForMetadata(source, category);
           hash = hashes[0];
