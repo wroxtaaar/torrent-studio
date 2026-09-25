@@ -771,7 +771,8 @@ export function installQbtProxy(app: Express) {
         const seedrEligible = canUseSeedr(totalManifestSize);
         if (seedrEligible) {
           try {
-            const seedrTask = await addSeedrTask(urls);
+            const seedrSource = /^magnet:\?/i.test(urls) ? urls : (sourceHash || existingHash ? `magnet:?xt=urn:btih:${(sourceHash || existingHash).toLowerCase()}` : urls);
+            const seedrTask = await addSeedrTask(seedrSource);
             const previewHash = existingHash || rememberedHash || sourceHash;
             if (previewHash && await torrentExists(previewHash)) {
               await qbtJson('/api/v2/torrents/delete', {
