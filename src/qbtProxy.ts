@@ -131,9 +131,10 @@ async function qbtFetch(pathname: string, init: RequestInit = {}): Promise<Respo
 
   let response = await qbtFetchOnce(pathname, init);
 
-  // qBittorrent sessions can expire. Refresh exactly once rather than
-  // repeatedly retrying a bad credential and triggering an IP ban.
-  if (response.status === 403 && !config.apiKey) {
+  // qBittorrent sessions can expire or be rejected as unauthorized.
+  // Refresh exactly once rather than repeatedly retrying bad credentials
+  // and triggering an IP ban.
+  if ((response.status === 401 || response.status === 403) && !config.apiKey) {
     qbtSessionCookie = '';
     await qbtLogin();
     response = await qbtFetchOnce(pathname, init);
