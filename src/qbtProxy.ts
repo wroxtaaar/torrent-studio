@@ -262,7 +262,7 @@ function isRemoteTorrentSource(value: string): boolean {
   return /^https?:\/\//i.test(value) && !value.startsWith(internalServerBase + '/api/v2/');
 }
 
-async function addTorrentForMetadata(urls: string, category: string): Promise<string[]> {
+async function addTorrentForMetadata(urls: string, category: string, authHeaders?: { authorization?: string; cookie?: string }): Promise<string[]> {
   const source = String(urls || '').trim();
   const resolvedSource = source.startsWith('/api/search/torrents/grab/')
     ? internalServerBase + source
@@ -279,9 +279,18 @@ async function addTorrentForMetadata(urls: string, category: string): Promise<st
   // keys out of the browser and avoids relying on qBittorrent's handling of a
   // remote .torrent URL.
   if (isRemoteTorrentSource(resolvedSource)) {
-    const response = await fetch(resolvedSource, {
-      headers: { 'Accept': 'application/x-bittorrent, application/octet-stream, */*' },
-    });
+    const headers: Record<string, string> = {
+      'Accept': 'application/x-bittorrent, application/octet-stream, */*',
+    };
+
+    // Search grab endpoints are protected by Torrent Studio's app auth.
+    // When the backend calls its own grab endpoint, forward the already
+    // authenticated browser session instead of making an unauthenticated
+    // server-to-server request.
+    if (authHeaders?.authorization) headers.Authorization = authHeaders.authorization;
+    if (authHeaders?.cookie) headers.Cookie = authHeaders.cookie;
+
+    const response = await fetch(resolvedSource, { headers });
 
     const data = Buffer.from(await response.arrayBuffer());
     if (!response.ok) {
@@ -690,7 +699,10 @@ export function installQbtProxy(app: Express) {
         let hash = sourceHash;
 
         if (!hash || !(await torrentExists(hash))) {
-          const hashes = await addTorrentForMetadata(source, category);
+          const hashes = await addTorrentForMetadata(source, category, {
+            authorization: String(req.headers.authorization || ''),
+            cookie: String(req.headers.cookie || ''),
+          });
           hash = hashes[0];
         }
 
@@ -809,7 +821,10 @@ export function installQbtProxy(app: Express) {
           // unnecessary pause/stall when the user re-adds the same result.
           hashes = [reuseHash];
         } else {
-          hashes = await addTorrentForMetadata(urls, category);
+          hashes = await addTorrentForMetadata(urls, category, {
+            authorization: String(req.headers.authorization || ''),
+            cookie: String(req.headers.cookie || ''),
+          });
         }
 
         const selectedSet = new Set(selectedFiles.map(Number));
