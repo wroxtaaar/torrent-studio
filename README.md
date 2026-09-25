@@ -104,3 +104,8 @@ DOMAIN=seedflow.example.com
 Create an A record for `DOMAIN` pointing to the Oracle VPS public IP. Open TCP ports 80 and 443 in the Oracle network security rules. Caddy then terminates HTTPS and proxies requests to the private app container.
 
 The app itself listens on `127.0.0.1:3000` on the VPS and qBittorrent/Prowlarr/FlareSolverr stay on the Docker network.
+
+
+### Quick HTTPS hostname without buying a domain
+
+For a fixed public IPv4 address, `sslip.io` can provide a hostname that resolves to the embedded IP address, and it documents using Let's Encrypt certificates for externally accessible hosts. For the current VPS IP, a hostname such as `sf-129-154-242-170.sslip.io` can be used as `DOMAIN`. citeturn791696search0
