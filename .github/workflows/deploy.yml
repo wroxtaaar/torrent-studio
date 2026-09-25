@@ -31,12 +31,14 @@ jobs:
 
           ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
 
-          ssh -i ~/.ssh/id_ed25519 "$VPS_USER@$VPS_HOST" '
+          REMOTE_PATH="$(printf '%q' "$VPS_PROJECT_PATH")"
+
+          ssh -i ~/.ssh/id_ed25519 "$VPS_USER@$VPS_HOST" "
             set -e
-            cd "$VPS_PROJECT_PATH"
+            cd $REMOTE_PATH
             git fetch origin personal
             git reset --hard origin/personal
             docker compose up -d --build --force-recreate
             docker compose ps
             curl --fail --silent --show-error http://127.0.0.1:3000/health
-          '
+          "
