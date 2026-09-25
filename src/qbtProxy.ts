@@ -1,6 +1,7 @@
 import bencode from 'bencode';
 import crypto from 'crypto';
 import type { Express, Request, Response, NextFunction } from 'express';
+import { addSeedrTask, canUseSeedr, listSeedrTasks, isSeedrConfigured, seedrMaxSizeBytes } from './seedr.ts';
 
 type QbtConfig = {
   baseUrl: string;
@@ -749,6 +750,35 @@ export function installQbtProxy(app: Express) {
 
         const selectedFiles = Array.isArray(body.selectedFiles) ? body.selectedFiles.map(Number) : [];
         const manifest = Array.isArray(body.manifest) ? body.manifest : [];
+
+        // Basic hybrid routing: for a whole torrent at or below the configured
+        // Seedr size limit, try Seedr first. If Seedr is unavailable, the token
+        // is expired, or the account rejects the operation, transparently fall
+        // back to the existing qBittorrent flow.
+        const totalManifestSize = manifest.reduce((sum: number, item: any) => sum + Number(item?.size || 0), 0);
+        const seedrEligible = canUseSeedr(totalManifestSize);
+        if (seedrEligible) {
+          try {
+            const seedrTask = await addSeedrTask(urls);
+            const previewHash = existingHash || getPreviewTorrent(urls) || extractInfoHash(urls);
+            if (previewHash && await torrentExists(previewHash)) {
+              await qbtJson('/api/v2/torrents/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ hashes: previewHash, deleteFiles: 'false' }),
+              });
+            }
+            for (const [source, entry] of previewTorrentHashes) {
+              if (entry.hash === previewHash) previewTorrentHashes.delete(source);
+            }
+            console.log('[HYBRID] Seedr accepted torrent:', seedrTask?.user_torrent_id ?? seedrTask?.id ?? 'unknown');
+            return res.json({ ok: true, backend: 'seedr', seedrTaskId: seedrTask?.user_torrent_id ?? seedrTask?.id ?? null, maxSizeBytes: seedrMaxSizeBytes() });
+          } catch (seedrError: any) {
+            console.warn('[HYBRID] Seedr unavailable; falling back to qBittorrent:', seedrError?.message || seedrError);
+          }
+        } else if (isSeedrConfigured()) {
+          console.log('[HYBRID] Torrent exceeds Seedr limit; using qBittorrent.');
+        }
 
         // Selection is mandatory. Keep the torrent paused until priorities
         // are applied, whether this is a new torrent or the paused preview
