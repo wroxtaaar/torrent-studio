@@ -706,7 +706,7 @@ function hlsCacheDirectory(sourcePath: string): string {
   const stat = fs.statSync(sourcePath);
   const key = crypto
     .createHash('sha256')
-    .update('hls-v3')
+    .update('hls-v4-mpegts')
     .update(sourcePath)
     .update(String(stat.size))
     .update(String(stat.mtimeMs))
@@ -717,8 +717,7 @@ function hlsCacheDirectory(sourcePath: string): string {
 function isHlsReady(cacheDir: string): boolean {
   return (
     fs.existsSync(path.join(cacheDir, 'index.m3u8')) &&
-    fs.existsSync(path.join(cacheDir, 'init.mp4')) &&
-    fs.existsSync(path.join(cacheDir, 'segment_00000.m4s'))
+    fs.existsSync(path.join(cacheDir, 'segment_00000.ts'))
   );
 }
 
@@ -828,9 +827,8 @@ async function prepareHls(sourcePath: string): Promise<string> {
       '-hls_playlist_type', 'event',
       '-hls_list_size', '0',
       '-hls_flags', 'independent_segments+temp_file',
-      '-hls_segment_type', 'fmp4',
-      '-hls_fmp4_init_filename', 'init.mp4',
-      '-hls_segment_filename', path.join(cacheDir, 'segment_%05d.m4s'),
+      '-hls_segment_type', 'mpegts',
+      '-hls_segment_filename', path.join(cacheDir, 'segment_%05d.ts'),
       playlist
     ];
 
@@ -859,8 +857,7 @@ async function prepareHls(sourcePath: string): Promise<string> {
         try {
           const generatedPlaylist = fs.readFileSync(playlist, 'utf8');
           if (
-            !fs.existsSync(initSegment) ||
-            !fs.existsSync(path.join(cacheDir, 'segment_00000.m4s')) ||
+            !fs.existsSync(path.join(cacheDir, 'segment_00000.ts')) ||
             !generatedPlaylist.includes('#EXT-X-ENDLIST')
           ) {
             reject(new Error('ffmpeg finished without producing a complete HLS playlist.'));
@@ -1142,7 +1139,7 @@ async function main() {
     if (!f || f.type !== 'video') return res.status(404).send('Video not found');
 
     const asset = String(req.params.asset || '');
-    if (!/^(index\.m3u8|init\.mp4|segment_\d{5}\.m4s)$/.test(asset)) {
+    if (!/^(index\.m3u8|segment_\d{5}\.ts)$/.test(asset)) {
       return res.status(400).send('Invalid HLS asset');
     }
 
@@ -1161,6 +1158,7 @@ async function main() {
 
         const playlist = rewriteHlsPlaylist(fs.readFileSync(playlistPath, 'utf8'), f.id);
         res.setHeader('Content-Type','application/vnd.apple.mpegurl');
+        res.setHeader('X-SeedFlow-HLS', 'mpegts');
         res.setHeader('Cache-Control','no-store, no-cache, must-revalidate');
         res.setHeader('Access-Control-Allow-Origin','*');
         res.setHeader('Access-Control-Allow-Headers','Range');
@@ -1172,7 +1170,7 @@ async function main() {
         return res.status(404).send('HLS segment not ready');
       }
 
-      res.type('video/mp4');
+      res.type('video/mp2t');
       res.setHeader('Accept-Ranges','bytes');
       res.setHeader('Cache-Control','public, max-age=31536000, immutable');
       res.setHeader('Access-Control-Allow-Origin','*');
