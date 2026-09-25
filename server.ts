@@ -676,17 +676,23 @@ async function prepareBrowserVideo(sourcePath: string, requestedAudioStreamIndex
     const temp = cached + '.tmp';
     fs.rmSync(temp, { force: true });
 
+    const videoCopySafe =
+      String(video.codec_name || '').toLowerCase() === 'h264' &&
+      ['yuv420p', 'yuvj420p'].includes(String(video.pix_fmt || '').toLowerCase());
+
     await runFfmpeg([
       '-i', sourcePath,
       '-map', '0:v:0',
       ...(selectedAudio ? ['-map', `0:${selectedAudio.index}?`] : []),
       '-map_metadata', '0',
-      '-c:v', 'libx264',
-      '-preset', 'veryfast',
-      '-crf', '23',
-      '-pix_fmt', 'yuv420p',
-      '-profile:v', 'high',
-      '-level:v', '4.1',
+      '-c:v', videoCopySafe ? 'copy' : 'libx264',
+      ...(videoCopySafe ? [] : [
+        '-preset', 'veryfast',
+        '-crf', '23',
+        '-pix_fmt', 'yuv420p',
+        '-profile:v', 'high',
+        '-level:v', '4.1'
+      ]),
       ...(selectedAudio
         ? (String(selectedAudio.codec_name || '').toLowerCase() === 'aac'
           ? ['-c:a', 'copy']
