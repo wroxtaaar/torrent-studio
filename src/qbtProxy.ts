@@ -99,20 +99,19 @@ async function qbtLogin(): Promise<void> {
   }
 }
 
-async function qbtFetchOnce(pathname: string, init: RequestInit = {}): Promise<Response> {
+async function qbtFetchOnce(pathname: string, init: RequestInit = {}, cookieOverride = ''): Promise<Response> {
   const headers = new Headers(init.headers);
+
   if (config.apiKey) {
     headers.set('Authorization', `Bearer ${config.apiKey}`);
-  } else if (config.username && config.password) {
-    // qBittorrent 5.2+ supports HTTP Basic authentication. Use Basic as the
-    // primary transport instead of combining it with a potentially stale SID.
-    // Combining Cookie + Authorization can make qBittorrent authenticate the
-    // request against the stale cookie and return "Authentication required".
-    const basic = Buffer.from(`${config.username}:${config.password}`).toString('base64');
-    headers.set('Authorization', `Basic ${basic}`);
   } else {
-    headers.set('Cookie', qbtSessionCookie);
+    // qBittorrent 5.2.3 reliably accepts the QBT_SID cookie returned by the
+    // login endpoint. Prefer that cookie for API requests; Basic auth is only
+    // used by qBittorrent as a way to establish a session when no cookie exists.
+    const cookie = cookieOverride || qbtSessionCookie;
+    if (cookie) headers.set('Cookie', cookie);
   }
+
   headers.set('Accept', headers.get('Accept') || 'application/json');
   headers.set('Referer', config.baseUrl + '/');
   headers.set('Origin', config.baseUrl);
@@ -134,30 +133,18 @@ async function qbtFetchOnce(pathname: string, init: RequestInit = {}): Promise<R
 async function qbtFetch(pathname: string, init: RequestInit = {}): Promise<Response> {
   requireConfig();
 
-  // qBittorrent 5.2+ uses Basic auth directly. Session-cookie login remains
-  // available when API-key/basic credentials are not configured.
-  if (!config.apiKey && !(config.username && config.password)) await qbtLogin();
+  if (!config.apiKey) await qbtLogin();
 
   let response = await qbtFetchOnce(pathname, init);
+  console.log(`[QBT] ${pathname} -> HTTP ${response.status}`);
 
-  // qBittorrent sessions can expire or be rejected as unauthorized.
-  // Refresh exactly once rather than repeatedly retrying bad credentials
-  // and triggering an IP ban.
+  // qBittorrent 5.2.x can reject an expired/stale QBT_SID with 401/403.
+  // Perform one completely fresh login and retry with the newly-issued cookie.
   if ((response.status === 401 || response.status === 403) && !config.apiKey) {
     qbtSessionCookie = '';
     await qbtLogin();
-    // Retry through the session-cookie path only when Basic authentication
-    // was rejected. This keeps 5.2+ requests on the reliable Basic path.
-    const originalUsername = config.username;
-    const originalPassword = config.password;
-    try {
-      (config as any).username = undefined;
-      (config as any).password = undefined;
-      response = await qbtFetchOnce(pathname, init);
-    } finally {
-      (config as any).username = originalUsername;
-      (config as any).password = originalPassword;
-    }
+    response = await qbtFetchOnce(pathname, init, qbtSessionCookie);
+    console.log(`[QBT] ${pathname} retry -> HTTP ${response.status}`);
   }
 
   return response;
