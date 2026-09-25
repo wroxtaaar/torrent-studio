@@ -766,11 +766,12 @@ async function prepareSubtitleVtt(sourcePath: string, streamIndex: number): Prom
 
 async function streamBrowserVideo(
   sourcePath: string,
+  req: Request,
   res: Response,
   requestedAudioStreamIndex?: number
 ): Promise<void> {
   const cached = await prepareBrowserVideo(sourcePath, requestedAudioStreamIndex);
-  sendFile(null as any, res, cached, false);
+  sendFile(req, res, cached, false);
 }
 
 function reqOnClose(res: Response, callback: () => void) {
@@ -1317,7 +1318,7 @@ async function main() {
         audioParam !== undefined && Number.isInteger(Number(audioParam))
           ? Number(audioParam)
           : undefined;
-      await streamBrowserVideo(fullPath, res, audioIndex);
+      await streamBrowserVideo(fullPath, req, res, audioIndex);
     } catch (error: any) {
       console.error('[DIRECT-STREAM] preparation failed:', error);
       if (!res.headersSent) return res.status(500).send(error?.message || 'Unable to prepare video.');
@@ -1584,7 +1585,7 @@ async function main() {
         audioParam !== undefined && Number.isInteger(Number(audioParam))
           ? Number(audioParam)
           : undefined;
-      await streamBrowserVideo(candidate, res, audioIndex);
+      await streamBrowserVideo(candidate, req, res, audioIndex);
     } catch (e: any) {
       console.error('[TORRENT-DIRECT-STREAM]', e?.message || e);
       if (!res.headersSent) return res.status(502).send(e?.message || 'Unable to stream torrent file');
