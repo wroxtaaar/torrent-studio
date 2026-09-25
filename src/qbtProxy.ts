@@ -684,49 +684,19 @@ export function installQbtProxy(app: Express) {
 
         const category = String((req.body as any)?.category || 'Downloads');
 
-        // Magnet inspection must use qBittorrent's fetchMetadata endpoint.
-        // Do NOT add the magnet to /torrents/add during preview: fetchMetadata
-        // resolves the metadata without creating a download, while the final
-        // /torrents/add happens only after the user selects files.
-        if (sourceHash && !isInternalSearchGrab && !/^https?:\/\//i.test(source)) {
-          const metadata = await inspectMetadata(source);
-          if (!metadata) {
-            return res.status(202).json({
-              name: 'Torrent',
-              hash: sourceHash,
-              files: [],
-              totalSize: 0,
-              source: 'qbt_metadata_pending',
-              pending: true,
-              message: 'qBittorrent is still obtaining the torrent metadata.'
-            });
-          }
-
-          const rawFiles = Array.isArray(metadata.files) ? metadata.files : [];
-          const mappedFiles = mapInspectFiles(rawFiles);
-          return res.json({
-            name: metadata.name || 'Torrent',
-            hash: sourceHash,
-            files: mappedFiles,
-            totalSize: mappedFiles.reduce((sum: number, f: any) => sum + f.size, 0),
-            source: 'qbt_metadata'
-          });
-        }
-
-        // Search results / remote .torrent URLs still use the existing
-        // server-side add-and-inspect path. The actual torrent is created
-        // paused so nothing downloads before file selection.
+        // Preview through qBittorrent's normal torrent engine. The torrent is
+        // created with stopCondition=MetadataReceived, so it remains paused and
+        // cannot download anything before the user selects files.
         let hash = sourceHash;
-        if (hash && await torrentExists(hash)) {
-          // Reuse an existing torrent without changing its current state.
-        } else {
+
+        if (!hash || !(await torrentExists(hash))) {
           const hashes = await addTorrentForMetadata(source, category);
           hash = hashes[0];
         }
 
         if (hash) rememberPreviewTorrent(source, hash);
 
-        const files = await waitForTorrentFiles(hash, 10, 1000);
+        const files = await waitForTorrentFiles(hash, 30, 1000);
         if (!files.length) {
           return res.status(202).json({
             name: 'Torrent',
