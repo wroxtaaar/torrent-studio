@@ -10,7 +10,6 @@ export interface TorrentSearchResult {
   infoHash?: string;
   magnetUrl?: string;
   downloadUrl?: string;
-  fileCount?: number;
   infoUrl?: string;
   sourceUrl?: string;
 }
