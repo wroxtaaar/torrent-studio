@@ -1224,19 +1224,25 @@ def _seedr_folder(folder: dict[str, Any]) -> dict[str, Any]:
 
 
 def _seedr_progress_value(value: Any, depth: int = 0) -> float | None:
-    if value is None or depth > 5:
+    if value is None or depth > 6:
         return None
     if isinstance(value, (int, float)):
         number = float(value)
         return number * 100 if 0 <= number <= 1 else number
     if isinstance(value, str):
         try:
-            number = float(value.strip())
+            number = float(value.strip().rstrip("%"))
             return number * 100 if 0 <= number <= 1 else number
         except ValueError:
             return None
     if not isinstance(value, dict):
         return None
+
+    # Seedr progress payloads can contain both a top-level progress value and
+    # a nested stats.progress value. The top-level value may legitimately be
+    # 0 while the nested live value has advanced, so don't let a zero/empty
+    # field mask a more useful nested progress reading.
+    zero_result: float | None = None
     for key in (
         "progress", "percent", "percentage", "progress_percent",
         "progressPercentage", "downloaded_percent", "downloadedPercent",
@@ -1245,20 +1251,48 @@ def _seedr_progress_value(value: Any, depth: int = 0) -> float | None:
         if key in value:
             result = _seedr_progress_value(value[key], depth + 1)
             if result is not None:
-                return result
+                if result > 0:
+                    return result
+                if zero_result is None:
+                    zero_result = result
+
     try:
-        downloaded = float(value.get("downloaded") or value.get("downloaded_bytes") or value.get("bytes_downloaded") or 0)
-        size = float(value.get("size") or value.get("total_size") or value.get("total_bytes") or 0)
+        downloaded = float(
+            value.get("downloaded")
+            or value.get("downloaded_bytes")
+            or value.get("bytes_downloaded")
+            or 0
+        )
+        size = float(
+            value.get("size")
+            or value.get("total_size")
+            or value.get("total_bytes")
+            or 0
+        )
         if downloaded >= 0 and size > 0:
-            return downloaded / size * 100
+            result = downloaded / size * 100
+            if result > 0:
+                return result
+            if zero_result is None:
+                zero_result = result
     except (TypeError, ValueError):
         pass
+
     for key, child in value.items():
-        if "progress" in str(key).lower() or "percent" in str(key).lower():
+        key_lower = str(key).lower()
+        if (
+            "progress" in key_lower
+            or "percent" in key_lower
+            or key_lower in {"stats", "torrent_progress"}
+        ):
             result = _seedr_progress_value(child, depth + 1)
             if result is not None:
-                return result
-    return None
+                if result > 0:
+                    return result
+                if zero_result is None:
+                    zero_result = result
+
+    return zero_result
 
 
 def _seedr_normalize_magnet(magnet: str) -> str:
