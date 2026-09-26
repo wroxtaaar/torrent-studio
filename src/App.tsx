@@ -4,7 +4,7 @@
  * unlimited server storage, HTTP range streaming, and selective downloads.
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Cloud,
   Download,
@@ -78,7 +78,40 @@ export default function App() {
   const [theme, setTheme] = useState<'dark' | 'dim' | 'light'>(() => {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
-        return (localStorage.getItem('seedflow_theme') as any) || 'dark';
+        const seedrFolderGroups = useMemo(() => {
+    const groups = new Map<string, {
+      folderId: string;
+      name: string;
+      path: string;
+      files: typeof seedrFiles;
+      totalSize: number;
+    }>();
+
+    for (const file of seedrFiles) {
+      const folderId = file.folderId || '__root__';
+      const path = file.folderPath || '/';
+      const parts = path.split('/').filter(Boolean);
+      const name = parts[parts.length - 1] || 'Root Files';
+      const existing = groups.get(folderId);
+
+      if (existing) {
+        existing.files.push(file);
+        existing.totalSize += file.size;
+      } else {
+        groups.set(folderId, {
+          folderId,
+          name,
+          path,
+          files: [file],
+          totalSize: file.size
+        });
+      }
+    }
+
+    return Array.from(groups.values());
+  }, [seedrFiles]);
+
+  return (localStorage.getItem('seedflow_theme') as any) || 'dark';
       }
     } catch {
       // Sandboxed or iframe storage restricted
@@ -102,6 +135,7 @@ export default function App() {
   const [seedrConfigured, setSeedrConfigured] = useState(false);
   const [seedrLoading, setSeedrLoading] = useState(false);
   const [seedrError, setSeedrError] = useState<string | null>(null);
+  const [selectedSeedrFolderId, setSelectedSeedrFolderId] = useState<string | null>(null);
 
   // File Explorer State
   const [currentFolder, setCurrentFolder] = useState<string>('/');
@@ -484,6 +518,16 @@ export default function App() {
   };
 
 
+  const handleDownloadSeedrFolder = async (folderId: string) => {
+    try {
+      const result = await api.getSeedrFolderDownload(folderId);
+      window.open(result.url, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      console.error('Failed to create Seedr folder download:', error);
+      setSeedrError(error instanceof Error ? error.message : 'Failed to create Seedr folder download');
+    }
+  };
+
   const handleDownloadSeedrFile = async (fileId: string) => {
     try {
       const result = await api.getSeedrFileDownload(fileId);
@@ -782,6 +826,19 @@ export default function App() {
           </button>
 
           <button
+            onClick={() => setActiveTab('files')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition ${
+              activeTab === 'files'
+                ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+            }`}
+          >
+            <Folder className="w-4 h-4" />
+            <span>My Cloud Files</span>
+            <span className="text-[10px] opacity-70">({files.length})</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('transfers')}
             className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition ${
               activeTab === 'transfers'
@@ -1031,50 +1088,121 @@ export default function App() {
               )}
 
               {seedrConfigured && seedrFiles.length > 0 && (
-                <div className="mt-3 grid grid-cols-1 gap-2">
-                  {seedrFiles.map(file => (
-                    <div
-                      key={file.id}
-                      className="flex items-center justify-between gap-3 rounded-xl bg-slate-900/80 border border-slate-800 px-3 py-2.5"
-                    >
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium text-slate-200">{file.name}</div>
-                        <div className="text-[10px] text-slate-500 mt-0.5">
-                          {formatBytes(file.size)} • {file.folderPath === '/' ? 'Root' : file.folderPath}
-                        </div>
-                      </div>
-                      <div className="shrink-0 flex items-center gap-1.5">
-                        {/\.(mkv|mp4|m4v|webm|mov|avi|m3u8|ts|mp3|wav|flac|aac|ogg|m4a)$/i.test(file.name) && (
+                <div className="mt-3">
+                  {selectedSeedrFolderId === null ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {seedrFolderGroups.map(folder => (
+                        <div
+                          key={folder.folderId}
+                          className="rounded-xl bg-slate-900/80 border border-slate-800 px-3 py-3 hover:border-slate-700 transition"
+                        >
                           <button
                             type="button"
-                            onClick={() => handleStreamSeedrFile(file)}
-                            className="px-2.5 py-1.5 rounded-lg bg-cyan-500 text-slate-950 font-bold text-xs hover:bg-cyan-400 transition"
+                            onClick={() => folder.folderId !== '__root__' && setSelectedSeedrFolderId(folder.folderId)}
+                            className="w-full text-left flex items-center gap-3"
+                            disabled={folder.folderId === '__root__'}
                           >
-                            Stream
+                            <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400 shrink-0">
+                              <Folder className="w-5 h-5" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-sm font-semibold text-slate-100">{folder.name}</div>
+                              <div className="text-[10px] text-slate-500 mt-0.5">
+                                {folder.files.length} file{folder.files.length === 1 ? '' : 's'} • {formatBytes(folder.totalSize)}
+                              </div>
+                            </div>
+                            {folder.folderId !== '__root__' && <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />}
                           </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => handleDownloadSeedrFile(file.id)}
-                          className="px-2.5 py-1.5 rounded-lg bg-emerald-400 text-slate-950 font-bold text-xs hover:bg-emerald-300 transition"
-                        >
-                          Download
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteSeedrFile(file)}
-                          className="p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200 transition"
-                          title="Delete Seedr folder"
-                          aria-label={`Delete Seedr folder containing ${file.name}`}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
+
+                          <div className="flex items-center justify-end gap-1.5 mt-3 pt-2 border-t border-slate-800">
+                            {folder.folderId !== '__root__' && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadSeedrFolder(folder.folderId)}
+                                  className="px-2.5 py-1.5 rounded-lg bg-emerald-400 text-slate-950 font-bold text-xs hover:bg-emerald-300 transition"
+                                >
+                                  Download ZIP
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteSeedrFile(folder.files[0])}
+                                  className="p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200 transition"
+                                  title="Delete Seedr folder"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  ) : (
+                    (() => {
+                      const folder = seedrFolderGroups.find(item => item.folderId === selectedSeedrFolderId);
+                      if (!folder) return null;
+
+                      return (
+                        <div>
+                          <div className="flex items-center justify-between gap-3 mb-3">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedSeedrFolderId(null)}
+                              className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5"
+                            >
+                              ← Back to folders
+                            </button>
+                            <div className="text-right min-w-0">
+                              <div className="text-sm font-semibold text-slate-100 truncate">{folder.name}</div>
+                              <div className="text-[10px] text-slate-500">{folder.files.length} files • {formatBytes(folder.totalSize)}</div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadSeedrFolder(folder.folderId)}
+                              className="shrink-0 px-2.5 py-1.5 rounded-lg bg-emerald-400 text-slate-950 font-bold text-xs hover:bg-emerald-300 transition"
+                            >
+                              Download ZIP
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 gap-2">
+                            {folder.files.map(file => (
+                              <div
+                                key={file.id}
+                                className="flex items-center justify-between gap-3 rounded-xl bg-slate-900/80 border border-slate-800 px-3 py-2.5"
+                              >
+                                <div className="min-w-0">
+                                  <div className="truncate text-sm font-medium text-slate-200">{file.name}</div>
+                                  <div className="text-[10px] text-slate-500 mt-0.5">{formatBytes(file.size)}</div>
+                                </div>
+                                <div className="shrink-0 flex items-center gap-1.5">
+                                  {/\.(mkv|mp4|m4v|webm|mov|avi|m3u8|ts|mp3|wav|flac|aac|ogg|m4a)$/i.test(file.name) && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleStreamSeedrFile(file)}
+                                      className="px-2.5 py-1.5 rounded-lg bg-cyan-500 text-slate-950 font-bold text-xs hover:bg-cyan-400 transition"
+                                    >
+                                      Stream
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDownloadSeedrFile(file.id)}
+                                    className="px-2.5 py-1.5 rounded-lg bg-emerald-400 text-slate-950 font-bold text-xs hover:bg-emerald-300 transition"
+                                  >
+                                    Download
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()
+                  )}
                 </div>
-              )}
-            </div>
+              )}            </div>
 
             {/* Header & Breadcrumb & Search */}
             <div className="flex flex-col gap-3 p-4 rounded-2xl bg-slate-900 border border-slate-800">
