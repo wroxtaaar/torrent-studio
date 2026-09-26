@@ -379,9 +379,8 @@ export async function setSeedrUnwanted(
       const actual = decodeUnwantedBitmap(encoded, fileCount, msbFirst);
       return actual.length === wanted.size && actual.every(index => wanted.has(index));
     } catch {
-      // The endpoint accepted the write, but this API response cannot be
-      // verified. Leave the requested bitmap in place rather than guessing.
-      return true;
+      // Do not resume when the server cannot confirm the unwanted bitmap.
+      return false;
     }
   };
 
