@@ -25,7 +25,13 @@ async function seedrRequest(
   const token = getToken();
   if (!token) throw new Error('Seedr API token is not configured');
 
-  const response = await fetch(new URL(path, SEEDR_API_BASE), {
+  // URL() treats a base path without a trailing slash as a file, and a
+  // leading slash in the request path resets the URL to the domain root.
+  // Seedr's API lives under /api/v0.1/p, so normalize both sides before
+  // resolving the endpoint.
+  const baseUrl = SEEDR_API_BASE.endsWith('/') ? SEEDR_API_BASE : SEEDR_API_BASE + '/';
+  const requestPath = String(path).replace(/^\\/+/, '');
+  const response = await fetch(new URL(requestPath, baseUrl), {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
