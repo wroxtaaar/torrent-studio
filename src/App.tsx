@@ -78,39 +78,6 @@ export default function App() {
   const [theme, setTheme] = useState<'dark' | 'dim' | 'light'>(() => {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
-        const seedrFolderGroups = useMemo(() => {
-    const groups = new Map<string, {
-      folderId: string;
-      name: string;
-      path: string;
-      files: typeof seedrFiles;
-      totalSize: number;
-    }>();
-
-    for (const file of seedrFiles) {
-      const folderId = file.folderId || '__root__';
-      const path = file.folderPath || '/';
-      const parts = path.split('/').filter(Boolean);
-      const name = parts[parts.length - 1] || 'Root Files';
-      const existing = groups.get(folderId);
-
-      if (existing) {
-        existing.files.push(file);
-        existing.totalSize += file.size;
-      } else {
-        groups.set(folderId, {
-          folderId,
-          name,
-          path,
-          files: [file],
-          totalSize: file.size
-        });
-      }
-    }
-
-    return Array.from(groups.values());
-  }, [seedrFiles]);
-
   return (localStorage.getItem('seedflow_theme') as any) || 'dark';
       }
     } catch {
@@ -1379,7 +1346,40 @@ export default function App() {
                 const isOwner = folder.ownerId === activeUser?.id;
                 const userPerm = isOwner ? 'admin' : folder.permissions[activeUser?.id || ''] || 'viewer';
 
-                return (
+                const seedrFolderGroups = useMemo(() => {
+    const groups = new Map<string, {
+      folderId: string;
+      name: string;
+      path: string;
+      files: typeof seedrFiles;
+      totalSize: number;
+    }>();
+
+    for (const file of seedrFiles) {
+      const folderId = file.folderId || '__root__';
+      const path = file.folderPath || '/';
+      const parts = path.split('/').filter(Boolean);
+      const name = parts[parts.length - 1] || 'Root Files';
+      const existing = groups.get(folderId);
+
+      if (existing) {
+        existing.files.push(file);
+        existing.totalSize += file.size;
+      } else {
+        groups.set(folderId, {
+          folderId,
+          name,
+          path,
+          files: [file],
+          totalSize: file.size
+        });
+      }
+    }
+
+    return Array.from(groups.values());
+  }, [seedrFiles]);
+
+  return (
                   <div
                     key={folder.id}
                     className="p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition flex flex-col justify-between gap-3"
