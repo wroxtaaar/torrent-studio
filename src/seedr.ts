@@ -1,209 +1,336 @@
-const SEEDR_RESOURCE_URL = 'https://www.seedr.cc/oauth_test/resource.php';
+const SEEDR_API_BASE = 'https://www.seedr.cc/api/v0.1/p';
 const SEEDR_MAX_SIZE_BYTES = Number(process.env.SEEDR_MAX_SIZE_GB || 5) * 1024 * 1024 * 1024;
 
 function getToken(): string {
   return String(process.env.SEEDR_API_TOKEN || '').trim();
 }
 
-function getAccessToken(): string {
-  const token = getToken();
-  if (!token) return '';
-
-  // Seedr PATs used by the OAuth API are encoded token payloads. Keep a
-  // fallback to the raw value so older token formats remain usable.
-  try {
-    const decoded = Buffer.from(token, 'base64').toString('utf8');
-    const parsed = JSON.parse(decoded);
-    if (parsed?.access_token) return String(parsed.access_token);
-  } catch {
-    // Raw access token fallback.
-  }
-
-  return token;
-}
-
 export function isSeedrConfigured(): boolean {
-  return Boolean(getAccessToken());
+  return Boolean(getToken());
 }
 
 export function canUseSeedr(totalSize: number): boolean {
-  return isSeedrConfigured() && Number.isFinite(totalSize) && totalSize > 0 && totalSize <= SEEDR_MAX_SIZE_BYTES;
+  return isSeedrConfigured() &&
+    Number.isFinite(totalSize) &&
+    totalSize > 0 &&
+    totalSize <= SEEDR_MAX_SIZE_BYTES;
 }
 
-async function seedrRequest(func: string, method: 'GET' | 'POST' = 'GET', data?: Record<string, string>): Promise<any> {
-  const accessToken = getAccessToken();
-  if (!accessToken) throw new Error('Seedr API token is not configured');
+function getStatus(error: unknown): number | undefined {
+  const status = Number((error as any)?.status);
+  return Number.isFinite(status) && status > 0 ? status : undefined;
+}
 
-  const url = new URL(SEEDR_RESOURCE_URL);
-  url.searchParams.set('access_token', accessToken);
-  url.searchParams.set('func', func);
+function asArray(value: any, keys: string[] = []): any[] {
+  if (Array.isArray(value)) return value;
+  for (const key of keys) {
+    if (Array.isArray(value?.[key])) return value[key];
+  }
+  if (Array.isArray(value?.data)) return value.data;
+  if (Array.isArray(value?.data?.items)) return value.data.items;
+  return [];
+}
+
+function unwrapData(value: any): any {
+  return value?.data ?? value;
+}
+
+async function seedrRequest(
+  path: string,
+  method: 'GET' | 'POST' | 'DELETE' = 'GET',
+  body?: Record<string, unknown>
+): Promise<any> {
+  const token = getToken();
+  if (!token) throw new Error('Seedr API token is not configured');
 
   const init: RequestInit = {
     method,
-    headers: { Accept: 'application/json' },
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
   };
 
-  if (method === 'POST') {
-    const form = new URLSearchParams();
-    for (const [key, value] of Object.entries(data || {})) form.set(key, value);
-    init.headers = {
-      Accept: 'application/json',
-      'Content-Type': 'application/x-www-form-urlencoded',
-    };
-    init.body = form;
+  if (body !== undefined) {
+    (init.headers as Record<string, string>)['Content-Type'] = 'application/json';
+    init.body = JSON.stringify(body);
   }
 
-  const response = await fetch(url, init);
+  const response = await fetch(SEEDR_API_BASE + (path.startsWith('/') ? path : '/' + path), init);
   const text = await response.text();
 
   let result: any = null;
-  try { result = text ? JSON.parse(text) : null; } catch { result = text; }
+  try {
+    result = text ? JSON.parse(text) : null;
+  } catch {
+    result = text;
+  }
 
   if (!response.ok) {
-    const message = result?.error || result?.message || text || response.statusText || 'Seedr API request failed';
+    const message =
+      result?.error_description ||
+      result?.error ||
+      result?.message ||
+      text ||
+      response.statusText ||
+      'Seedr API request failed';
     throw Object.assign(new Error(String(message)), { status: response.status });
   }
 
-  if (result?.error && result.error !== '0') {
-    throw Object.assign(new Error(String(result.error)), { status: 502 });
-  }
-
   return result;
-}
-
-export async function addSeedrTask(magnet: string): Promise<any> {
-  return seedrRequest('add_torrent', 'POST', {
-    torrent_magnet: magnet,
-    folder_id: '-1',
-  });
-}
-
-export async function listSeedrTasks(): Promise<any[]> {
-  const data = await seedrRequest('list_contents', 'POST', {
-    content_type: 'folder',
-    content_id: '0',
-  });
-
-  return Array.isArray(data?.torrents) ? data.torrents : [];
-}
-
-async function listSeedrFolder(folderId: string | number = '0'): Promise<any> {
-  return seedrRequest('list_contents', 'POST', {
-    content_type: 'folder',
-    content_id: String(folderId),
-  });
-}
-
-async function fetchSeedrFile(fileId: string | number): Promise<any> {
-  return seedrRequest('fetch_file', 'POST', {
-    folder_file_id: String(fileId),
-  });
 }
 
 function numericId(value: any): string {
   return String(value ?? '');
 }
 
-function taskMatches(task: any, taskId: string): boolean {
-  return [
-    task?.id,
-    task?.task_id,
-    task?.user_torrent_id,
-    task?.torrent_id,
-  ].map(numericId).includes(taskId);
+function extractTaskId(result: any): string {
+  const data = unwrapData(result);
+  return numericId(
+    data?.id ??
+    data?.task_id ??
+    data?.torrent_id ??
+    data?.user_torrent_id
+  );
 }
 
 function taskProgress(task: any): number {
-  const raw = task?.progress ?? task?.pct ?? task?.percentage ?? task?.percent ?? 0;
+  const raw =
+    task?.progress ??
+    task?.percentage ??
+    task?.percent ??
+    task?.pct ??
+    task?.progress_percent ??
+    0;
+
   const value = Number(String(raw).replace('%', ''));
-  return Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0;
+  return Number.isFinite(value)
+    ? Math.max(0, Math.min(100, value))
+    : 0;
 }
 
 function taskIsComplete(task: any): boolean {
   if (!task) return false;
-  const status = String(task?.status ?? task?.state ?? task?.phase ?? '').toLowerCase();
+
+  const status = String(
+    task?.status ??
+    task?.state ??
+    task?.phase ??
+    task?.download_status ??
+    ''
+  ).toLowerCase();
+
   return taskProgress(task) >= 100 ||
     ['completed', 'complete', 'finished', 'done', 'success', 'succeeded'].includes(status);
 }
 
-function extractUrl(details: any): string {
-  return String(
-    details?.url ??
-    details?.download_url ??
-    details?.downloadUrl ??
-    details?.direct_url ??
-    details?.directUrl ??
-    ''
+function normalizeFile(file: any, folderId = ''): any {
+  const id = numericId(
+    file?.id ??
+    file?.file_id ??
+    file?.folder_file_id
   );
-}
 
-function normalizeFile(file: any): any {
   return {
-    id: numericId(file?.folder_file_id ?? file?.file_id ?? file?.id),
+    id,
     name: String(file?.name ?? file?.filename ?? ''),
-    size: Number(file?.size ?? 0),
-    folderId: numericId(file?.folder_id ?? file?.fid ?? file?.folderId),
+    size: Number(file?.size ?? file?.length ?? 0),
+    folderId: numericId(file?.folder_id ?? file?.folderId ?? folderId),
   };
 }
 
-async function collectSeedrFiles(folderId: string | number = '0', depth = 0): Promise<any[]> {
-  if (depth > 6) return [];
+function normalizeFolder(folder: any): { id: string; name: string } {
+  return {
+    id: numericId(folder?.id ?? folder?.folder_id),
+    name: String(folder?.name ?? folder?.title ?? 'Folder'),
+  };
+}
 
-  const payload = await listSeedrFolder(folderId);
-  const files = Array.isArray(payload?.files) ? payload.files.map(normalizeFile) : [];
-  const folders = Array.isArray(payload?.folders) ? payload.folders : [];
+function extractFiles(payload: any, folderId = ''): any[] {
+  return asArray(payload, ['files', 'items']).map(file => normalizeFile(file, folderId));
+}
+
+function extractFolders(payload: any): any[] {
+  return asArray(payload, ['folders', 'directories']).map(normalizeFolder);
+}
+
+async function getTask(taskId: string | number): Promise<any> {
+  return seedrRequest(`/tasks/${encodeURIComponent(String(taskId))}`);
+}
+
+async function getTaskContents(taskId: string | number): Promise<any> {
+  return seedrRequest(`/tasks/${encodeURIComponent(String(taskId))}/contents`);
+}
+
+async function getTaskProgress(taskId: string | number): Promise<any> {
+  return seedrRequest(`/tasks/${encodeURIComponent(String(taskId))}/progress`);
+}
+
+export async function addSeedrTask(magnet: string): Promise<any> {
+  return seedrRequest('/tasks', 'POST', {
+    torrent_magnet: magnet,
+    folder_id: 0,
+  });
+}
+
+export async function listSeedrTasks(): Promise<any[]> {
+  const data = await seedrRequest('/tasks');
+  return asArray(data, ['tasks', 'torrents']);
+}
+
+async function getFolderContents(folderId: string | number): Promise<any> {
+  if (String(folderId) === '0') {
+    return seedrRequest('/fs/root/contents');
+  }
+
+  return seedrRequest(`/fs/folder/${encodeURIComponent(String(folderId))}/contents`);
+}
+
+async function getFileDetails(fileId: string | number): Promise<any> {
+  return seedrRequest(`/fs/file/${encodeURIComponent(String(fileId))}`);
+}
+
+async function getDownloadUrl(fileId: string | number): Promise<{ url: string; name: string }> {
+  const result = await seedrRequest(
+    `/download/file/${encodeURIComponent(String(fileId))}/url`
+  );
+
+  const data = unwrapData(result);
+
+  const url = String(
+    data?.url ??
+    data?.download_url ??
+    data?.downloadUrl ??
+    data?.direct_url ??
+    data?.directUrl ??
+    (typeof result === 'string' ? result : '')
+  );
+
+  if (!url) throw new Error('Seedr did not return a download URL');
+
+  return {
+    url,
+    name: String(data?.name ?? data?.filename ?? ''),
+  };
+}
+
+async function collectSeedrFiles(
+  folderId: string | number = '0',
+  folderPath = '/',
+  depth = 0
+): Promise<SeedrLibraryFile[]> {
+  if (depth > 8) return [];
+
+  const payload = await getFolderContents(folderId);
+  const files = extractFiles(payload, String(folderId)).map(file => ({
+    id: file.id,
+    name: file.name,
+    size: file.size,
+    folderId: file.folderId,
+    folderPath,
+  }));
 
   const nested = await Promise.all(
-    folders.map((folder: any) => {
-      const childId = folder?.id ?? folder?.folder_id ?? folder?.fid;
-      return childId == null ? [] : collectSeedrFiles(childId, depth + 1);
-    })
+    extractFolders(payload)
+      .filter(folder => Boolean(folder.id))
+      .map(folder => {
+        const childPath =
+          folderPath === '/'
+            ? '/' + folder.name
+            : folderPath + '/' + folder.name;
+
+        return collectSeedrFiles(folder.id, childPath, depth + 1);
+      })
   );
 
   return [...files, ...nested.flat()];
 }
 
-async function getTaskProgress(task: any): Promise<{ progress: number; task: any }> {
+function fileNameOnly(name: string): string {
+  return String(name).split('/').pop()?.toLowerCase() || '';
+}
+
+async function taskFiles(taskId: string | number): Promise<any[]> {
+  const payload = await getTaskContents(taskId);
+  return extractFiles(payload);
+}
+
+async function fetchTaskProgress(taskId: string | number, task: any): Promise<{ progress: number; task: any }> {
   const direct = taskProgress(task);
-  if (direct > 0 || taskIsComplete(task) || !task?.progress_url) {
+  if (direct > 0 || taskIsComplete(task)) {
     return { progress: direct, task };
   }
 
   try {
-    const progressUrl = String(task.progress_url);
-    const url = new URL(progressUrl);
-    const response = await fetch(url);
-    if (response.ok) {
-      const progressData = await response.json();
-      const progress = taskProgress(progressData);
-      return { progress, task: { ...task, ...progressData } };
-    }
-  } catch {
-    // Fall back to the list_contents torrent object.
-  }
+    const progressResult = await getTaskProgress(taskId);
+    const progressData = unwrapData(progressResult);
+    const progressUrl = String(
+      progressData?.url ??
+      progressData?.progress_url ??
+      progressData?.progressUrl ??
+      ''
+    );
 
-  return { progress: direct, task };
+    if (progressUrl) {
+      const url = new URL(progressUrl, SEEDR_API_BASE);
+      const response = await fetch(url, {
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${getToken()}`,
+        },
+      });
+
+      if (response.ok) {
+        const text = await response.text();
+        let data: any = null;
+        try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+
+        return {
+          progress: taskProgress(data),
+          task: { ...task, ...unwrapData(data) },
+        };
+      }
+    }
+
+    return {
+      progress: taskProgress(progressData),
+      task: { ...task, ...progressData },
+    };
+  } catch {
+    return { progress: direct, task };
+  }
 }
 
-export async function getSeedrTaskStatus(taskId: string | number, selectedNames: string[] = []): Promise<any> {
+export async function getSeedrTaskStatus(
+  taskId: string | number,
+  selectedNames: string[] = []
+): Promise<any> {
   const id = numericId(taskId);
-  const tasks = await listSeedrTasks();
-  const matched = tasks.find(item => taskMatches(item, id)) ?? null;
-  const progressResult = await getTaskProgress(matched);
-  const task = progressResult.task;
+
+  let task: any;
+  try {
+    task = await getTask(id);
+  } catch (error) {
+    const status = getStatus(error);
+
+    if (status === 404) {
+      return {
+        taskId,
+        status: 'waiting',
+        progress: 0,
+        task: null,
+        files: [],
+        downloadUrl: null,
+      };
+    }
+
+    throw error;
+  }
+
+  const progressResult = await fetchTaskProgress(id, unwrapData(task));
+  task = progressResult.task;
   const progress = progressResult.progress;
   const complete = taskIsComplete(task);
-
-  if (!matched) {
-    return {
-      taskId,
-      status: 'waiting',
-      progress: 0,
-      task: null,
-      files: [],
-      downloadUrl: null,
-    };
-  }
 
   if (!complete) {
     return {
@@ -216,32 +343,34 @@ export async function getSeedrTaskStatus(taskId: string | number, selectedNames:
     };
   }
 
-  const allFiles = await collectSeedrFiles('0');
+  let candidates = await taskFiles(id);
+
   const normalizedSelected = selectedNames
-    .map(name => String(name).split('/').pop()?.toLowerCase() || '')
+    .map(fileNameOnly)
     .filter(Boolean);
 
-  let candidates = allFiles;
   if (normalizedSelected.length) {
-    const matchedFiles = allFiles.filter(file => {
-      const name = String(file.name).split('/').pop()?.toLowerCase() || '';
-      return normalizedSelected.includes(name);
-    });
+    const matchedFiles = candidates.filter(file =>
+      normalizedSelected.includes(fileNameOnly(file.name))
+    );
+
     if (matchedFiles.length) candidates = matchedFiles;
   }
 
   const files = [];
+
   for (const file of candidates.slice(0, 50)) {
     if (!file.id) continue;
 
     try {
-      const details = await fetchSeedrFile(file.id);
-      const url = extractUrl(details);
+      const details = await getFileDetails(file.id);
+      const download = await getDownloadUrl(file.id);
+
       files.push({
         id: file.id,
-        name: file.name,
-        size: file.size,
-        url: url || null,
+        name: String(details?.name ?? details?.filename ?? file.name),
+        size: Number(details?.size ?? details?.length ?? file.size ?? 0),
+        url: download.url,
       });
     } catch {
       files.push({
@@ -263,7 +392,6 @@ export async function getSeedrTaskStatus(taskId: string | number, selectedNames:
   };
 }
 
-
 export type SeedrLibraryFile = {
   id: string;
   name: string;
@@ -273,45 +401,11 @@ export type SeedrLibraryFile = {
 };
 
 export async function listSeedrLibrary(): Promise<SeedrLibraryFile[]> {
-  const walk = async (folderId: string | number, folderPath: string, depth = 0): Promise<SeedrLibraryFile[]> => {
-    if (depth > 8) return [];
-
-    const payload = await listSeedrFolder(folderId);
-    const files = Array.isArray(payload?.files)
-      ? payload.files.map((file: any) => ({
-          id: numericId(file?.folder_file_id ?? file?.file_id ?? file?.id),
-          name: String(file?.name ?? file?.filename ?? ''),
-          size: Number(file?.size ?? 0),
-          folderId: numericId(folderId),
-          folderPath,
-        })).filter((file: SeedrLibraryFile) => Boolean(file.id && file.name))
-      : [];
-
-    const folders = Array.isArray(payload?.folders) ? payload.folders : [];
-    const nested = await Promise.all(
-      folders.map(async (folder: any) => {
-        const childId = folder?.id ?? folder?.folder_id ?? folder?.fid;
-        if (childId == null) return [];
-        const childName = String(folder?.name ?? folder?.title ?? 'Folder');
-        const childPath = folderPath === '/' ? '/' + childName : folderPath + '/' + childName;
-        return walk(childId, childPath, depth + 1);
-      })
-    );
-
-    return [...files, ...nested.flat()];
-  };
-
-  return walk('0', '/');
+  return collectSeedrFiles('0', '/');
 }
 
 export async function getSeedrFileDownload(fileId: string | number): Promise<{ url: string; name: string }> {
-  const details = await fetchSeedrFile(fileId);
-  const url = extractUrl(details);
-  if (!url) throw new Error('Seedr did not return a download URL');
-  return {
-    url,
-    name: String(details?.name ?? details?.filename ?? ''),
-  };
+  return getDownloadUrl(fileId);
 }
 
 export function seedrMaxSizeBytes(): number {
