@@ -456,14 +456,15 @@ async def torrents_add(body: dict[str, Any]):
         seedr_magnet = _seedr_normalize_magnet(urls)
         info_hash = _seedr_info_hash(seedr_magnet)
         if not info_hash:
+            print("[SEEDR] magnet validation failed: no BTIH info hash could be extracted")
             raise HTTPException(400, "Seedr requires a valid magnet link with a BTIH info hash")
         print(f"[SEEDR] normalized magnet hash={info_hash}")
         seedr_result = await _seedr_find_task_by_hash(info_hash)
         if not seedr_result:
-            seedr_result = _seedr_data(await seedr_request("/tasks", "POST", {
-                "torrent_magnet": seedr_magnet,
-                "folder_id": int(SEEDR_LIBRARY_FOLDER_ID),
-            }, form=True))
+            seedr_result = await _seedr_add_task(
+            seedr_magnet,
+            int(SEEDR_LIBRARY_FOLDER_ID),
+        )
         if not isinstance(seedr_result, dict):
             raise HTTPException(502, "Seedr did not return a valid task response")
 
@@ -1187,45 +1188,52 @@ def _seedr_progress_value(value: Any, depth: int = 0) -> float | None:
 
 
 def _seedr_normalize_magnet(magnet: str) -> str:
-    value = str(magnet or "").strip()
-    if not re.match(r"^magnet:\?", value, re.IGNORECASE):
+    value = re.sub(r"[\\r\\n\\t]+", "", str(magnet or "").strip())
+    if not value:
         return value
 
-    # Some indexers/clipboard sources URL-encode the entire xt value, while
-    # others use the 32-character Base32 form of a BTIH. Normalize both into
-    # the canonical form Seedr accepts: urn:btih:<40-char-hex>.
+    # Some clipboard/indexer paths URL-encode the complete magnet URI.
+    decoded_value = unquote(value)
+    if re.match(r"^magnet:\\?", decoded_value, re.IGNORECASE):
+        value = decoded_value
+    elif not re.match(r"^magnet:\\?", value, re.IGNORECASE):
+        return value
+
+    # Normalize percent-encoded xt values and 32-character Base32 BTIH values
+    # into the 40-character hexadecimal form Seedr accepts.
     try:
         parsed = urlsplit(value)
         params = parse_qs(parsed.query, keep_blank_values=True)
         xt_values = params.get("xt") or []
-        btih_index = -1
         btih_value = ""
 
-        for index, raw_xt in enumerate(xt_values):
+        for raw_xt in xt_values:
             decoded_xt = unquote(str(raw_xt)).strip()
             match = re.fullmatch(r"urn:btih:([A-Za-z0-9]{32,40})", decoded_xt, re.IGNORECASE)
             if match:
-                btih_index = index
                 btih_value = match.group(1)
                 break
+
+        # Fallback for unusual magnets whose query encoding defeats parse_qs.
+        if not btih_value:
+            match = re.search(r"urn:btih:([A-Za-z0-9]{32,40})", unquote(value), re.IGNORECASE)
+            if match:
+                btih_value = match.group(1)
 
         if not btih_value:
             return value
 
         if len(btih_value) == 32 and re.fullmatch(r"[A-Z2-7a-z2-7]{32}", btih_value):
-            import base64 as _base64
-            padded = btih_value.upper() + "=" * ((8 - len(btih_value) % 8) % 8)
             try:
-                btih_value = _base64.b32decode(padded).hex()
+                padded = btih_value.upper() + "=" * ((8 - len(btih_value) % 8) % 8)
+                btih_value = base64.b32decode(padded).hex()
             except Exception:
                 return value
         elif len(btih_value) != 40 or not re.fullmatch(r"[A-Fa-f0-9]{40}", btih_value):
             return value
 
-        # Preserve the original query encoding for all non-xt parameters.
-        # In particular, don't percent-encode the ':' characters in
-        # urn:btih: again: some Seedr V2 deployments are stricter about the
-        # magnet parser than normal URL query parsers.
+        # Preserve all original query parameters while replacing the first
+        # BTIH xt value with the canonical raw urn:btih:<40-hex> form.
         raw_parts = parsed.query.split("&") if parsed.query else []
         rewritten_parts: list[str] = []
         replaced = False
@@ -1243,15 +1251,58 @@ def _seedr_normalize_magnet(magnet: str) -> str:
 
         if replaced:
             return "magnet:?" + "&".join(rewritten_parts)
-        return value
+
+        # Hash was found, but the xt parameter is unusual. Use a minimal
+        # canonical URI rather than passing a parser-hostile magnet to Seedr.
+        return f"magnet:?xt=urn:btih:{btih_value.lower()}"
     except Exception:
         return value
 
 
 def _seedr_info_hash(magnet: str) -> str:
     value = _seedr_normalize_magnet(magnet)
-    match = re.search(r"urn:btih:([a-zA-Z0-9]{32,40})", value, re.IGNORECASE)
-    return match.group(1).lower() if match else ""
+    for candidate in (value, unquote(value)):
+        match = re.search(r"urn:btih:([a-zA-Z0-9]{32,40})", candidate, re.IGNORECASE)
+        if match:
+            return match.group(1).lower()
+    return ""
+
+
+async def _seedr_add_task(magnet: str, folder_id: int) -> dict[str, Any]:
+    normalized = _seedr_normalize_magnet(magnet)
+    try:
+        result = _seedr_data(await seedr_request(
+            "/tasks",
+            "POST",
+            {"torrent_magnet": normalized, "folder_id": folder_id},
+            form=True,
+        ))
+        if isinstance(result, dict):
+            return result
+        raise HTTPException(502, "Seedr did not return a valid task response")
+    except HTTPException as exc:
+        # Some Seedr deployments reject otherwise valid magnets when tracker,
+        # display-name, or query encoding is unusual. Retry only that exact
+        # parser rejection with a minimal canonical BTIH URI.
+        info_hash = _seedr_info_hash(normalized)
+        if (
+            exc.status_code == 400
+            and "badly formatted magnet link" in str(exc.detail).lower()
+            and info_hash
+        ):
+            fallback = f"magnet:?xt=urn:btih:{info_hash.lower()}"
+            if fallback != normalized:
+                print(f"[SEEDR] retrying task creation with canonical BTIH magnet hash={info_hash}")
+                result = _seedr_data(await seedr_request(
+                    "/tasks",
+                    "POST",
+                    {"torrent_magnet": fallback, "folder_id": folder_id},
+                    form=True,
+                ))
+                if isinstance(result, dict):
+                    return result
+                raise HTTPException(502, "Seedr did not return a valid task response")
+        raise
 
 
 def _seedr_task_info_hash(task: dict[str, Any]) -> str:
@@ -1592,17 +1643,17 @@ async def seedr_prepare(body: dict[str, Any]):
     seedr_magnet = _seedr_normalize_magnet(magnet)
     info_hash = _seedr_info_hash(seedr_magnet)
     if not info_hash:
+        print("[SEEDR] magnet validation failed: no BTIH info hash could be extracted")
         raise HTTPException(400, "Seedr requires a valid magnet link with a BTIH info hash")
     print(f"[SEEDR] normalized magnet hash={info_hash}")
     task = await _seedr_find_task_by_hash(info_hash)
     created = False
 
     if not task:
-        task = _seedr_data(await seedr_request("/tasks", "POST", {
-            "torrent_magnet": seedr_magnet,
-            "folder_id": int(SEEDR_LIBRARY_FOLDER_ID),
-        }, form=True))
-        task = task if isinstance(task, dict) else {}
+        task = await _seedr_add_task(
+            seedr_magnet,
+            int(SEEDR_LIBRARY_FOLDER_ID),
+        )
         created = True
 
     task_id = str(
