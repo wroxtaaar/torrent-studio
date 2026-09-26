@@ -316,7 +316,15 @@ export const api = {
     status: 'waiting' | 'downloading' | 'completed';
     progress: number;
     downloadUrl: string | null;
-    files: Array<{ id: string; name: string; size: number; url: string | null }>;
+    files: Array<{
+      id: string;
+      name: string;
+      size: number;
+      folderId: string;
+      folderPath: string;
+      url: string | null;
+      available?: boolean;
+    }>;
   }> {
     const res = await fetch('/api/seedr/tasks/' + encodeURIComponent(String(taskId)));
     const body = await res.text();
