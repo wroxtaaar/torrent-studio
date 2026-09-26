@@ -55,6 +55,67 @@ function unwrapData(value: any): any {
   return value;
 }
 
+function getAccessToken(): string {
+  const token = getToken();
+  if (!token) return '';
+
+  try {
+    const decoded = Buffer.from(token, 'base64').toString('utf8');
+    const parsed = JSON.parse(decoded);
+    if (parsed?.access_token) return String(parsed.access_token);
+  } catch {
+    // Raw access-token fallback.
+  }
+
+  return token;
+}
+
+async function legacySeedrRequest(
+  func: string,
+  data: Record<string, string> = {}
+): Promise<any> {
+  const accessToken = getAccessToken();
+  if (!accessToken) throw new Error('Seedr API token is not configured');
+
+  const url = new URL('https://www.seedr.cc/oauth_test/resource.php');
+  url.searchParams.set('access_token', accessToken);
+  url.searchParams.set('func', func);
+
+  const form = new URLSearchParams();
+  for (const [key, value] of Object.entries(data)) form.set(key, value);
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: form,
+  });
+
+  const text = await response.text();
+  let result: any = null;
+  try { result = text ? JSON.parse(text) : null; } catch { result = text; }
+
+  if (!response.ok) {
+    const message = result?.error || result?.message || text || response.statusText || 'Seedr API request failed';
+    throw Object.assign(new Error(String(message)), { status: response.status });
+  }
+
+  if (result?.error && result.error !== '0') {
+    throw Object.assign(new Error(String(result.error)), { status: 502 });
+  }
+
+  return result;
+}
+
+async function legacyListSeedrFolder(folderId: string | number = '0'): Promise<any> {
+  return legacySeedrRequest('list_contents', {
+    content_type: 'folder',
+    content_id: String(folderId),
+  });
+}
+
 function asArray(value: any, keys: string[] = []): any[] {
   if (Array.isArray(value)) return value;
   const data = unwrapData(value);
@@ -158,24 +219,36 @@ function findQuotaValues(value: any, depth = 0): { maxSpace: number; usedSpace: 
 }
 
 export async function getSeedrQuota(): Promise<SeedrQuota> {
-  const paths = [
-    '/me/quota',
-    '/fs/root/contents',
-    '/fs/root',
-    '/fs/path?path=%2F&contents=true'
+  const livePaths = [
+    async () => legacyListSeedrFolder('0'),
+    async () => seedrRequest('/me/quota'),
+    async () => seedrRequest('/fs/root/contents'),
+    async () => seedrRequest('/fs/root'),
+    async () => seedrRequest('/fs/path?path=%2F&contents=true')
   ];
 
   let lastError: unknown = null;
 
-  for (const path of paths) {
+  for (const getData of livePaths) {
     try {
-      const result = await seedrRequest(path);
+      const result = await getData();
       const quota = findQuotaValues(result);
       if (quota) {
         return {
           maxSpace: quota.maxSpace,
           usedSpace: quota.usedSpace,
           remainingSpace: Math.max(0, quota.maxSpace - quota.usedSpace),
+        };
+      }
+
+      const data = unwrapData(result);
+      const maxSpace = Number(data?.space_max ?? data?.max_space ?? 0);
+      const usedSpace = Number(data?.space_used ?? data?.used_space ?? 0);
+      if (maxSpace > 0 && usedSpace >= 0 && usedSpace <= maxSpace) {
+        return {
+          maxSpace,
+          usedSpace,
+          remainingSpace: Math.max(0, maxSpace - usedSpace),
         };
       }
     } catch (error) {
@@ -221,28 +294,34 @@ export async function findSeedrTaskByHash(infoHash: string): Promise<any | null>
 }
 
 async function getFolderContents(folderId: string | number): Promise<any> {
-  if (String(folderId) === '0') {
-    const rootPaths = [
-      '/fs/root/contents',
-      '/fs/root',
-      '/fs/path?path=%2F&contents=true'
-    ];
+  try {
+    return await legacyListSeedrFolder(folderId);
+  } catch (legacyError) {
+    // Keep the documented v0.1 API as a fallback for accounts where the
+    // legacy OAuth resource endpoint is unavailable.
+    if (String(folderId) === '0') {
+      const rootPaths = [
+        '/fs/root/contents',
+        '/fs/root',
+        '/fs/path?path=%2F&contents=true'
+      ];
 
-    let lastError: unknown = null;
-    for (const path of rootPaths) {
-      try {
-        return await seedrRequest(path);
-      } catch (error) {
-        lastError = error;
+      let lastError: unknown = legacyError;
+      for (const path of rootPaths) {
+        try {
+          return await seedrRequest(path);
+        } catch (error) {
+          lastError = error;
+        }
       }
+
+      throw lastError instanceof Error
+        ? lastError
+        : new Error('Unable to read the Seedr root library');
     }
 
-    throw lastError instanceof Error
-      ? lastError
-      : new Error('Unable to read the Seedr root library');
+    return seedrRequest(`/fs/folder/${encodeURIComponent(String(folderId))}/contents`);
   }
-
-  return seedrRequest(`/fs/folder/${encodeURIComponent(String(folderId))}/contents`);
 }
 
 async function getFileDetails(fileId: string | number): Promise<any> {
