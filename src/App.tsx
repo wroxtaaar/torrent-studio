@@ -479,32 +479,15 @@ export default function App() {
       return;
     }
 
-    // Search results already contain the torrent size and usually the info
-    // hash. Let the backend check quota and add to Seedr in one request.
-    if (size > 0 && seedrSource) {
-      try {
-        const result = await api.addSearchTorrent(trimmedSource, size, infoHash);
-
-        if (result.added && result.backend === 'seedr') {
-          setSeedrNotice({
-            taskId: result.seedrTaskId ?? null,
-            name: title || 'Seedr download',
-            status: 'waiting',
-            progress: 0,
-            downloadUrl: null,
-            files: [],
-            seedrReply: 'Seedr replied: task accepted',
-            selectionApplied: false,
-            selectionError: undefined,
-          });
-          setActiveTab('files');
-          return;
-        }
-      } catch (error) {
-        console.warn('Fast search-to-Seedr add failed; opening normal add flow:', error);
-      }
-    }
-
+    // Do not send search results directly to Seedr. A search result only
+    // gives us the aggregate torrent size; it does not tell us which files the
+    // user wants. Sending the whole magnet to Seedr first would make a
+    // multi-file torrent start immediately and can consume the entire free
+    // quota before the user gets a chance to select files.
+    //
+    // Open the normal selector instead. AddMagnetModal resolves the torrent
+    // through qBittorrent while paused, lets the user choose files, and only
+    // then sends the selected files to Seedr when they fit the remaining quota.
     openAddMagnet(source);
   };
 
