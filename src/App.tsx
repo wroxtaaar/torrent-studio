@@ -644,9 +644,9 @@ export default function App() {
         });
 
         if (!completed) {
-          // Keep API traffic modest on the free Seedr plan. Poll normally
-          // every 5 seconds, then increase responsiveness near completion.
-          scheduleNextPoll(progress >= 90 ? 2000 : 5000);
+          // Keep the transfer display close to Seedr's live progress. Poll
+          // every 2 seconds while active, including near completion.
+          scheduleNextPoll(2000);
         }
       } catch {
         // Keep the current status and retry after the normal interval.
