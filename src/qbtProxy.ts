@@ -1128,26 +1128,35 @@ export function installQbtProxy(app: Express) {
             throw new Error('Seedr did not return a task ID');
           }
 
-          // Apply the user's file selection before resuming. The Seedr API
-          // exposes an unwanted-file bitmap; do not resume unless the server
-          // confirms that selection was accepted.
+          let selectionApplied = false;
+          let selectionError = '';
+
+          // Test Seedr's selective-file API after creating the task. Seedr may
+          // start a free-plan task immediately, so failure is non-fatal: the
+          // Seedr task continues and downloads the full torrent.
           if (manifestFiles.length > 1 && hasSelection) {
             const unwantedIndexes = manifestFiles
               .map((_file: any, index: number) => index)
               .filter((index: number) => !selectedFileIndexes.includes(index));
 
-            await setSeedrUnwanted(seedrTaskId, manifestFiles.length, unwantedIndexes);
+            try {
+              await setSeedrUnwanted(seedrTaskId, manifestFiles.length, unwantedIndexes);
+              selectionApplied = true;
+              console.log('[SEEDR-DIRECT] Selective file selection verified by Seedr.');
+            } catch (error: any) {
+              selectionError = String(error?.message || error);
+              console.warn('[SEEDR-DIRECT] Seedr selective file selection unavailable; continuing with full torrent:', selectionError);
+            }
           }
 
-          if (hasSelection) {
-            await resumeSeedrTask(seedrTaskId);
-          }
           console.log('[SEEDR-DIRECT] Seedr response:', JSON.stringify(seedrTask));
 
           return res.json({
             ok: true,
             backend: 'seedr',
             seedrTaskId,
+            selectionApplied,
+            selectionError: selectionError || undefined,
             seedrResponse: seedrTask,
           });
         }
