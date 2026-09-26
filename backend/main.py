@@ -13,7 +13,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -453,11 +453,15 @@ async def torrents_add(body: dict[str, Any]):
                 "selectionError": selection_error,
             }
 
-        info_hash = _seedr_info_hash(urls)
-        seedr_result = await _seedr_find_task_by_hash(info_hash) if info_hash else None
+        seedr_magnet = _seedr_normalize_magnet(urls)
+        info_hash = _seedr_info_hash(seedr_magnet)
+        if not info_hash:
+            raise HTTPException(400, "Seedr requires a valid magnet link with a BTIH info hash")
+        print(f"[SEEDR] normalized magnet hash={info_hash}")
+        seedr_result = await _seedr_find_task_by_hash(info_hash)
         if not seedr_result:
             seedr_result = _seedr_data(await seedr_request("/tasks", "POST", {
-                "torrent_magnet": urls,
+                "torrent_magnet": seedr_magnet,
                 "folder_id": int(SEEDR_LIBRARY_FOLDER_ID),
             }, form=True))
         if not isinstance(seedr_result, dict):
@@ -1182,8 +1186,53 @@ def _seedr_progress_value(value: Any, depth: int = 0) -> float | None:
     return None
 
 
+def _seedr_normalize_magnet(magnet: str) -> str:
+    value = str(magnet or "").strip()
+    if not re.match(r"^magnet:\?", value, re.IGNORECASE):
+        return value
+
+    # Some indexers/clipboard sources URL-encode the entire xt value, while
+    # others use the 32-character Base32 form of a BTIH. Normalize both into
+    # the canonical form Seedr accepts: urn:btih:<40-char-hex>.
+    try:
+        parsed = urlsplit(value)
+        params = parse_qs(parsed.query, keep_blank_values=True)
+        xt_values = params.get("xt") or []
+        btih_index = -1
+        btih_value = ""
+
+        for index, raw_xt in enumerate(xt_values):
+            decoded_xt = unquote(str(raw_xt)).strip()
+            match = re.fullmatch(r"urn:btih:([A-Za-z0-9]{32,40})", decoded_xt, re.IGNORECASE)
+            if match:
+                btih_index = index
+                btih_value = match.group(1)
+                break
+
+        if not btih_value:
+            return value
+
+        if len(btih_value) == 32 and re.fullmatch(r"[A-Z2-7a-z2-7]{32}", btih_value):
+            import base64 as _base64
+            padded = btih_value.upper() + "=" * ((8 - len(btih_value) % 8) % 8)
+            try:
+                btih_value = _base64.b32decode(padded).hex()
+            except Exception:
+                return value
+        elif len(btih_value) != 40 or not re.fullmatch(r"[A-Fa-f0-9]{40}", btih_value):
+            return value
+
+        params["xt"] = [
+            f"urn:btih:{btih_value.lower()}" if i == btih_index else v
+            for i, v in enumerate(xt_values)
+        ]
+        return "magnet:?" + urlencode(params, doseq=True)
+    except Exception:
+        return value
+
+
 def _seedr_info_hash(magnet: str) -> str:
-    value = str(magnet or "")
+    value = _seedr_normalize_magnet(magnet)
     match = re.search(r"urn:btih:([a-zA-Z0-9]{32,40})", value, re.IGNORECASE)
     return match.group(1).lower() if match else ""
 
@@ -1523,13 +1572,17 @@ async def seedr_prepare(body: dict[str, Any]):
         raise HTTPException(503, "Seedr is not configured")
     if not SEEDR_LIBRARY_FOLDER_ID.isdigit():
         raise HTTPException(503, "SEEDR_LIBRARY_FOLDER_ID must be configured for Torrent Studio Seedr downloads")
-    info_hash = _seedr_info_hash(magnet)
-    task = await _seedr_find_task_by_hash(info_hash) if info_hash else None
+    seedr_magnet = _seedr_normalize_magnet(magnet)
+    info_hash = _seedr_info_hash(seedr_magnet)
+    if not info_hash:
+        raise HTTPException(400, "Seedr requires a valid magnet link with a BTIH info hash")
+    print(f"[SEEDR] normalized magnet hash={info_hash}")
+    task = await _seedr_find_task_by_hash(info_hash)
     created = False
 
     if not task:
         task = _seedr_data(await seedr_request("/tasks", "POST", {
-            "torrent_magnet": magnet,
+            "torrent_magnet": seedr_magnet,
             "folder_id": int(SEEDR_LIBRARY_FOLDER_ID),
         }, form=True))
         task = task if isinstance(task, dict) else {}
