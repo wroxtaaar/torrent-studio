@@ -599,8 +599,9 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={() => void cancelPreparedSeedrTask()}
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition"
+            aria-label="Cancel"
           >
             <X className="w-5 h-5" />
           </button>
