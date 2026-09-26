@@ -187,10 +187,23 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       }
 
       const selectedBackend = seedrTaskId != null ? 'seedr' : forceBackend;
-      const seedrSource =
+      let seedrSource =
         selectedBackend === 'seedr' && hash && /^[a-f0-9]{40}$/i.test(hash)
           ? `magnet:?xt=urn:btih:${hash.toLowerCase()}`
           : source;
+
+      // BEP 53 lets a magnet carry the exact file indices to download.
+      // This gives Seedr a chance to apply selection before storage is
+      // allocated, instead of adding the full torrent and filtering later.
+      if (selectedBackend === 'seedr') {
+        const index = Number(file.index);
+        if (Number.isInteger(index) && index >= 0) {
+          const separator = seedrSource.includes('?') ? '&' : '?';
+          if (!/[?&]so=/.test(seedrSource)) {
+            seedrSource += separator + 'so=' + encodeURIComponent(String(index));
+          }
+        }
+      }
 
       await onAdd(
         seedrSource,
@@ -521,12 +534,18 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
         // Quota lookup is best-effort; qBittorrent remains the fallback.
       }
 
-      const downloadSource =
+      let downloadSource =
         selectedBackend === 'seedr' &&
         inspectedHash &&
         /^[a-f0-9]{40}$/i.test(inspectedHash)
           ? `magnet:?xt=urn:btih:${inspectedHash.toLowerCase()}`
           : magnetInput.trim();
+
+      if (selectedBackend === 'seedr' && selectedFileIndexes.length > 0) {
+        const separator = downloadSource.includes('?') ? '&' : '?';
+        const so = selectedFileIndexes.join(',');
+        downloadSource += separator + 'so=' + encodeURIComponent(so);
+      }
 
       await onAdd(
         downloadSource,
