@@ -408,35 +408,66 @@ export async function getSeedrFileDownload(fileId: string | number): Promise<{ u
   return getDownloadUrl(fileId);
 }
 
+type SeedrSearchFile = {
+  id: string;
+  name: string;
+  size: number;
+  folderId: string;
+  presentationUrls: any;
+};
+
+async function searchSeedrFiles(query: string): Promise<SeedrSearchFile[]> {
+  const result = await seedrRequest(`/search/fs?query=${encodeURIComponent(query)}`);
+  const data = unwrapData(result);
+  const files = Array.isArray(data?.files) ? data.files : [];
+
+  return files.map((file: any) => ({
+    id: numericId(file?.id ?? file?.file_id ?? file?.folder_file_id),
+    name: String(file?.name ?? file?.filename ?? ''),
+    size: Number(file?.size ?? file?.length ?? 0),
+    folderId: numericId(file?.folder_id ?? file?.folderId),
+    presentationUrls: file?.presentation_urls ?? file?.presentationUrls ?? {},
+  }));
+}
+
+async function findSeedrFile(fileName: string): Promise<SeedrSearchFile> {
+  const files = await searchSeedrFiles(fileName);
+  const target = fileNameOnly(fileName);
+  const exact = files.find(file => fileNameOnly(file.name) === target) ?? files[0];
+
+  if (!exact?.id) {
+    throw new Error(`Seedr file not found: ${fileName}`);
+  }
+
+  return exact;
+}
+
 export async function getSeedrFilePresentation(
-  fileId: string | number,
+  fileName: string,
   presentationType: 'video' | 'audio'
 ): Promise<{ url: string; name: string }> {
-  const result = await seedrRequest(
-    `/presentations/file/${encodeURIComponent(String(fileId))}/${presentationType}`
-  );
-  const data = unwrapData(result);
+  const file = await findSeedrFile(fileName);
+  const urls = file.presentationUrls || {};
+
   const url = String(
-    data?.url ??
-    data?.stream_url ??
-    data?.streamUrl ??
-    data?.video_url ??
-    data?.audio_url ??
-    data?.hls_url ??
-    data?.playback_url ??
-    (typeof result === 'string' ? result : '')
+    presentationType === 'video'
+      ? (urls?.video?.hls ?? urls?.video?.url ?? urls?.video?.stream)
+      : (urls?.audio?.hls ?? urls?.audio?.url ?? urls?.audio?.stream)
   );
 
-  if (!url) throw new Error(`Seedr did not return a ${presentationType} playback URL`);
+  if (!url) {
+    throw new Error(`Seedr did not return a ${presentationType} playback URL for "${file.name}"`);
+  }
 
-  return {
-    url,
-    name: String(data?.name ?? data?.filename ?? ''),
-  };
+  return { url, name: file.name };
 }
 
 export async function deleteSeedrFile(fileId: string | number): Promise<void> {
   await seedrRequest(`/fs/file/${encodeURIComponent(String(fileId))}`, 'DELETE');
+}
+
+export async function deleteSeedrFolder(folderId: string | number): Promise<void> {
+  await seedrRequest(`/fs/folder/${encodeURIComponent(String(folderId))}`, 'DELETE');
 }
 
 export function seedrMaxSizeBytes(): number {
