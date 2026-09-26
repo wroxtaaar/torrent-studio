@@ -615,8 +615,13 @@ export function installQbtProxy(app: Express) {
       const body = await upstream.text();
 
       if (!contentType.includes('mpegurl') && !/^#EXTM3U/m.test(body.trim())) {
+        const binaryBody = await upstream.arrayBuffer();
         res.setHeader('Content-Type', contentType || 'application/octet-stream');
-        return res.send(body);
+        const contentLength = upstream.headers.get('content-length');
+        if (contentLength) res.setHeader('Content-Length', contentLength);
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        return res.send(Buffer.from(binaryBody));
       }
 
       const proxyBase = '/api/seedr/hls/master.m3u8?url=';
@@ -632,7 +637,7 @@ export function installQbtProxy(app: Express) {
       };
 
       const rewritten = body
-        .split(/\\r?\\n/)
+        .split(/\r?\n/)
         .map(line => {
           const trimmed = line.trim();
 
@@ -644,7 +649,7 @@ export function installQbtProxy(app: Express) {
           // Playlist/segment URL lines.
           return trimmed ? rewriteUrl(trimmed) : line;
         })
-        .join('\\n');
+        .join('\n');
 
       res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
       res.setHeader('Cache-Control', 'no-store');
