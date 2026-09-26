@@ -1188,15 +1188,15 @@ def _seedr_progress_value(value: Any, depth: int = 0) -> float | None:
 
 
 def _seedr_normalize_magnet(magnet: str) -> str:
-    value = re.sub(r"[\\r\\n\\t]+", "", str(magnet or "").strip())
+    value = re.sub(r"[\r\n\t]+", "", str(magnet or "").strip())
     if not value:
         return value
 
     # Some clipboard/indexer paths URL-encode the complete magnet URI.
     decoded_value = unquote(value)
-    if re.match(r"^magnet:\\?", decoded_value, re.IGNORECASE):
+    if re.match(r"^magnet:\?", decoded_value, re.IGNORECASE):
         value = decoded_value
-    elif not re.match(r"^magnet:\\?", value, re.IGNORECASE):
+    elif not re.match(r"^magnet:\?", value, re.IGNORECASE):
         return value
 
     # Normalize percent-encoded xt values and 32-character Base32 BTIH values
