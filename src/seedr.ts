@@ -174,9 +174,53 @@ function normalizeTaskPayload(task: any): any {
   return data?.task ?? data;
 }
 
+function extractProgressValue(value: any, depth = 0): number | null {
+  if (value == null || depth > 5) return null;
+
+  if (typeof value === 'number' || (typeof value === 'string' && /^\s*-?\d+(?:\.\d+)?\s*$/.test(value))) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return null;
+    return number >= 0 && number <= 1 ? number * 100 : number;
+  }
+
+  if (typeof value !== 'object') return null;
+
+  const direct = [
+    value.progress,
+    value.percent,
+    value.percentage,
+    value.progress_percent,
+    value.progressPercentage,
+    value.downloaded_percent,
+    value.downloadedPercent,
+    value.completed_percent,
+    value.completedPercent,
+  ];
+
+  for (const candidate of direct) {
+    const number = extractProgressValue(candidate, depth + 1);
+    if (number != null) return number;
+  }
+
+  const downloaded = Number(value.downloaded ?? value.downloaded_bytes ?? value.bytes_downloaded);
+  const size = Number(value.size ?? value.total_size ?? value.total_bytes);
+  if (Number.isFinite(downloaded) && downloaded >= 0 && Number.isFinite(size) && size > 0) {
+    return (downloaded / size) * 100;
+  }
+
+  for (const [key, child] of Object.entries(value)) {
+    if (/progress|percent|downloaded/i.test(key)) {
+      const number = extractProgressValue(child, depth + 1);
+      if (number != null) return number;
+    }
+  }
+
+  return null;
+}
+
 function taskProgress(task: any): number {
-  const value = Number(task?.progress ?? task?.task?.progress ?? task?.torrent?.progress ?? 0);
-  return Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0;
+  const value = extractProgressValue(task?.progress ?? task?.task?.progress ?? task?.torrent?.progress);
+  return value == null ? 0 : Math.max(0, Math.min(100, value));
 }
 
 function taskIsComplete(task: any): boolean {
@@ -402,21 +446,43 @@ async function fetchTaskProgress(taskId: string | number, task: any): Promise<{ 
 
     if (progressUrl) {
       const url = new URL(progressUrl, SEEDR_API_BASE);
+      // Seedr's progress URL is a signed legacy subnode endpoint and commonly
+      // returns JSONP because the URL contains callback=?. Do not require the
+      // API Bearer token on the subnode host; parse both JSON and JSONP.
+      if (url.searchParams.get('callback') === '?') {
+        url.searchParams.set('callback', 'seedflowProgress');
+      }
+
       const response = await fetch(url, {
         headers: {
-          Accept: 'application/json',
-          Authorization: `Bearer ${getToken()}`,
+          Accept: 'application/json, text/plain, */*',
         },
       });
 
       if (response.ok) {
         const text = await response.text();
         let data: any = null;
-        try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch {
+          const start = text.indexOf('{');
+          const end = text.lastIndexOf('}');
+          if (start >= 0 && end > start) {
+            try {
+              data = JSON.parse(text.slice(start, end + 1));
+            } catch {
+              data = null;
+            }
+          }
+        }
+
+        const mergedTask = data ? { ...task, ...unwrapData(data) } : task;
+        const progress = taskProgress(mergedTask);
 
         return {
-          progress: taskProgress(data),
-          task: { ...task, ...unwrapData(data) },
+          progress,
+          task: mergedTask,
         };
       }
     }
