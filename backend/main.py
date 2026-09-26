@@ -479,6 +479,44 @@ async def torrents_add(body: dict[str, Any]):
         if not SEEDR_LIBRARY_FOLDER_ID.isdigit():
             raise HTTPException(503, "SEEDR_LIBRARY_FOLDER_ID must be configured for Seedr downloads")
 
+        # The frontend decides the backend from the user's selected files.
+        # Re-check the same selected-size rule server-side so a stale quota
+        # value cannot cause Seedr to receive a selection that no longer fits.
+        selected_size = sum(
+            max(0, int(item.get("size") or 0))
+            for item in manifest
+            if isinstance(item, dict) and int(item.get("priority") or 0) > 0
+        )
+
+        if selected_size > 0:
+            try:
+                quota = _seedr_data(await seedr_request("/me/quota"))
+                if isinstance(quota, dict):
+                    def quota_number(value: Any) -> int:
+                        try:
+                            return max(0, int(float(value))) if value not in (None, "") else 0
+                        except (TypeError, ValueError):
+                            return 0
+
+                    remaining = quota_number(quota.get("space_remaining") or quota.get("remainingSpace"))
+                    if remaining == 0:
+                        remaining = max(
+                            0,
+                            quota_number(quota.get("space_max")) - quota_number(quota.get("space_used"))
+                        )
+
+                    if selected_size >= remaining:
+                        raise HTTPException(
+                            413,
+                            f"Selected files require {selected_size} bytes but only {remaining} bytes remain in Seedr."
+                        )
+            except HTTPException:
+                raise
+            except Exception as exc:
+                # A temporary quota lookup failure should not block a request
+                # that the frontend already classified for Seedr.
+                print(f"[SEEDR] quota recheck failed: {exc}")
+
         # The qBittorrent metadata-only torrent is only a temporary
         # inspection helper. Once Seedr is selected, remove that preview
         # immediately so it never appears as a real paused download.
@@ -508,7 +546,7 @@ async def torrents_add(body: dict[str, Any]):
                 "seedrTaskId": int(seedr_task_id) if seedr_task_id.isdigit() else seedr_task_id,
                 "seedrResponse": {"user_torrent_id": seedr_task_id, "success": True, "reused": True},
                 "seedrFolderName": seedr_folder_name,
-                "seedrFolderId": str(task.get("folder_created_id") or ""),
+                "seedrFolderId": str((await _seedr_task(seedr_task_id)).get("folder_created_id") or ""),
                 "existingHash": existing_hash or None,
                 "selectionApplied": selection_applied,
                 "selectionError": selection_error,
