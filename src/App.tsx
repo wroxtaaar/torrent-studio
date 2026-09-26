@@ -97,7 +97,7 @@ export default function App() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [qbtSettings, setQbtSettings] = useState<QbtSettings | null>(null);
   const [cleanupSettings, setCleanupSettings] = useState<CleanupSettings | null>(null);
-  const [seedrNotice, setSeedrNotice] = useState<{ taskId: number | null; name: string; status: 'waiting' | 'downloading' | 'completed'; progress: number; downloadUrl: string | null } | null>(null);
+  const [seedrNotice, setSeedrNotice] = useState<{ taskId: number | string | null; name: string; status: 'waiting' | 'downloading' | 'completed'; progress: number; downloadUrl: string | null; files: Array<{ id: string; name: string; size: number; url: string | null }> } | null>(null);
 
   // File Explorer State
   const [currentFolder, setCurrentFolder] = useState<string>('/');
@@ -274,6 +274,7 @@ export default function App() {
         status: 'waiting',
         progress: 0,
         downloadUrl: null,
+        files: [],
       });
     } else {
       setSeedrNotice(null);
@@ -299,6 +300,7 @@ export default function App() {
           status: result.status,
           progress: result.progress,
           downloadUrl: result.downloadUrl,
+          files: result.files || [],
         } : null);
       } catch {
         // Keep the current status and retry on the next poll.
@@ -774,29 +776,60 @@ export default function App() {
         {activeTab === 'transfers' && (
           <div className="space-y-4">
             {seedrNotice && (
-              <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 text-xs flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="font-bold">
-                    {seedrNotice.status === 'completed' ? 'Seedr download ready' : 'Sent to Seedr'}
+              <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 text-xs space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-bold">
+                      {seedrNotice.status === 'completed' ? 'Seedr download completed' : 'Downloading with Seedr'}
+                    </div>
+                    <div className="text-emerald-400/80 mt-0.5 truncate">{seedrNotice.name}</div>
+                    {seedrNotice.status !== 'completed' && (
+                      <div className="mt-2">
+                        <div className="flex items-center justify-between text-[11px] text-emerald-400/80 mb-1">
+                          <span>Progress</span>
+                          <span>{Math.round(seedrNotice.progress)}%</span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-emerald-950 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-emerald-400 transition-all duration-500"
+                            style={{ width: `${Math.max(0, Math.min(100, seedrNotice.progress))}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div className="text-emerald-400/80 mt-0.5 truncate">{seedrNotice.name}</div>
-                  {seedrNotice.status !== 'completed' && (
-                    <div className="text-emerald-400/70 mt-1">Progress: {Math.round(seedrNotice.progress)}%</div>
-                  )}
+                  <span className="shrink-0 font-mono text-[11px]">Task {seedrNotice.taskId ?? 'created'}</span>
                 </div>
-                <div className="shrink-0 flex items-center gap-2">
-                  <span className="font-mono text-[11px]">Task {seedrNotice.taskId ?? 'created'}</span>
-                  {seedrNotice.downloadUrl && (
-                    <a
-                      href={seedrNotice.downloadUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="px-2.5 py-1.5 rounded-lg bg-emerald-400 text-slate-950 font-bold hover:bg-emerald-300 transition"
-                    >
-                      Download
-                    </a>
-                  )}
-                </div>
+
+                {seedrNotice.status === 'completed' && seedrNotice.files.length > 0 && (
+                  <div className="space-y-1.5 pt-2 border-t border-emerald-500/15">
+                    <div className="font-semibold text-emerald-200">Downloaded files</div>
+                    {seedrNotice.files.map(file => (
+                      <div key={file.id} className="flex items-center justify-between gap-2 rounded-xl bg-slate-950/30 px-2.5 py-2">
+                        <div className="min-w-0">
+                          <div className="truncate text-emerald-100">{file.name}</div>
+                          <div className="text-[10px] text-emerald-400/60">{formatBytes(file.size)}</div>
+                        </div>
+                        {file.url && (
+                          <a
+                            href={file.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="shrink-0 px-2.5 py-1.5 rounded-lg bg-emerald-400 text-slate-950 font-bold hover:bg-emerald-300 transition"
+                          >
+                            Download
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {seedrNotice.status === 'completed' && seedrNotice.files.length === 0 && (
+                  <div className="text-amber-300/80 pt-2 border-t border-emerald-500/15">
+                    Seedr reports the download as complete, but no files were returned yet.
+                  </div>
+                )}
               </div>
             )}
             {/* Action header */}
