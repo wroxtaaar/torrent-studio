@@ -74,10 +74,10 @@ import { TorrentSearchPanel } from './components/TorrentSearchPanel.tsx';
 
 export default function App() {
   // Navigation & Theme
-  const [activeTab, setActiveTab] = useState<'search' | 'files' | 'shared' | 'activity' | 'storage'>(() => {
+  const [activeTab, setActiveTab] = useState<'search' | 'transfers' | 'files' | 'shared' | 'activity' | 'storage'>(() => {
     try {
       const saved = window.localStorage.getItem('seedflow_active_tab');
-      return saved === 'files' || saved === 'shared' || saved === 'activity' || saved === 'storage'
+      return saved === 'search' || saved === 'transfers' || saved === 'files' || saved === 'shared' || saved === 'activity' || saved === 'storage'
         ? saved
         : 'search';
     } catch {
@@ -305,7 +305,7 @@ export default function App() {
       setSeedrAddBlockedNotice(
         'A Seedr download is already in progress. Free Seedr accounts allow one parallel download. Wait for it to finish before adding another magnet link.'
       );
-      setActiveTab('search');
+      setActiveTab('transfers');
       window.setTimeout(() => setSeedrAddBlockedNotice(null), 5000);
       return;
     }
@@ -505,7 +505,7 @@ export default function App() {
         console.warn('Torrent added, but storage stats could not be refreshed yet:', refreshError);
       }
 
-      setActiveTab('search');
+      setActiveTab('transfers');
     } catch (error: any) {
       if (error?.code === 'SEEDR_INSUFFICIENT_SPACE') {
         const required = Number(error.requiredBytes || 0);
@@ -958,6 +958,7 @@ export default function App() {
     .filter(t => t.state === 'downloading')
     .reduce((acc, t) => acc + t.dlspeed, 0);
   const totalUpSpeed = torrents.reduce((acc, t) => acc + t.upspeed, 0);
+  const activeDownloadsCount = torrents.filter(t => t.state === 'downloading').length;
   const unreadNotifsCount = notifications.filter(n => !n.read).length;
 
   const currentFolderPrefix = currentFolder === '/' ? '/' : currentFolder + '/';
@@ -1099,6 +1100,23 @@ export default function App() {
           </button>
 
           <button
+            onClick={() => setActiveTab('transfers')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition ${
+              activeTab === 'transfers'
+                ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+            }`}
+          >
+            <Download className="w-4 h-4" />
+            <span>Transfers & Seedbox</span>
+            {activeDownloadsCount > 0 && (
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${activeTab === 'transfers' ? 'bg-slate-950 text-cyan-400' : 'bg-cyan-500/20 text-cyan-300'}`}>
+                {activeDownloadsCount}
+              </span>
+            )}
+          </button>
+
+          <button
             onClick={() => setActiveTab('activity')}
             className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition ${
               activeTab === 'activity'
@@ -1161,6 +1179,132 @@ export default function App() {
         <div className={activeTab === 'search' ? 'block' : 'hidden'}>
           <TorrentSearchPanel onAdd={handleSearchAdd} />
         </div>
+
+        {/* TAB 1: TRANSFERS & SEEDBOX */}
+        {activeTab === 'transfers' && (
+          <div className="space-y-4">
+            {seedrNotice?.status === 'completed' && (
+              <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 text-xs space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-bold">
+                      {seedrNotice.status === 'completed' ? 'Seedr download complete' : 'Seedr download accepted'}
+                    </div>
+                    <div className="text-emerald-400/80 mt-0.5 truncate">{seedrNotice.name}</div>
+                    {seedrNotice.status !== 'completed' && (
+                      <div className="mt-2">
+                        <div className="flex items-center justify-between text-[11px] text-emerald-400/80 mb-1">
+                          <span>Progress</span>
+                          <span>{Number(seedrNotice.progress).toFixed(2).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1')}%</span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-emerald-950 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-emerald-400 transition-all duration-500"
+                            style={{ width: `${Math.max(0, Math.min(100, seedrNotice.progress))}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <span className="shrink-0 font-mono text-[11px]">Task {seedrNotice.taskId ?? 'created'}</span>
+                </div>
+                 {seedrNotice.selectionApplied === true && (
+                   <div className="mt-2 text-[11px] text-emerald-300">
+                     ✓ Seedr accepted your file selection.
+                   </div>
+                 )}
+                 {seedrNotice.selectionApplied === false && (
+                   <div className="mt-2 text-[11px] text-amber-300">
+                     ⚠ Seedr did not accept file selection — the full torrent will download.
+                     {seedrNotice.selectionError ? ` ${seedrNotice.selectionError}` : ''}
+                   </div>
+                 )}
+
+                {seedrNotice.status === 'completed' && seedrNotice.files.length > 0 && (
+                  <div className="space-y-1.5 pt-2 border-t border-emerald-500/15">
+                    <div className="font-semibold text-emerald-200">Downloaded files</div>
+                    {seedrNotice.files.map(file => (
+                      <div key={file.id} className="flex items-center justify-between gap-2 rounded-xl bg-slate-950/30 px-2.5 py-2">
+                        <div className="min-w-0">
+                          <div className="truncate text-emerald-100">{file.name}</div>
+                          <div className="text-[10px] text-emerald-400/60">{formatBytes(file.size)}</div>
+                        </div>
+                        {file.url && (
+                          <a
+                            href={file.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="shrink-0 px-2.5 py-1.5 rounded-lg bg-emerald-400 text-slate-950 font-bold hover:bg-emerald-300 transition"
+                          >
+                            Download
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+              </div>
+            )}
+            {/* Action header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-slate-900 border border-slate-800">
+              <div>
+                <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                  <Download className="w-5 h-5 text-cyan-400" />
+                  <span>Ongoing Downloads & Active Torrents</span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  High-speed server torrent downloader with real-time ETA, selective files.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => openAddMagnet()}
+                  className="px-3.5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-md shadow-cyan-500/20 transition"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Add Magnet</span>
+                </button>
+              </div>
+            </div>
+
+            {seedrNotice && seedrNotice.status !== 'completed' && (
+              <div className="p-4 rounded-2xl bg-slate-900 border border-emerald-500/25 shadow-lg shadow-emerald-500/5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <Cloud className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span className="text-xs font-bold text-emerald-300">Downloading with Seedr</span>
+                      <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        {seedrNotice.status === 'waiting' ? 'Waiting' : 'Downloading'}
+                      </span>
+                    </div>
+                    <div className="text-sm font-semibold text-slate-200 mt-1 truncate">{seedrNotice.name}</div>
+                    <div className="mt-3">
+                      <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1">
+                        <span>Seedr progress</span>
+                        <span className="font-mono text-emerald-300">
+                          {Number(seedrNotice.progress).toFixed(2).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '')}%
+                        </span>
+                      </div>
+                      <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-emerald-400 transition-all duration-500"
+                          style={{ width: `${Math.max(0, Math.min(100, Number(seedrNotice.progress) || 0))}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <span className="shrink-0 font-mono text-[10px] text-slate-500">
+                    Task {seedrNotice.taskId ?? 'created'}
+                  </span>
+                </div>
+              </div>
+            )}
+
+          </div>
+        )}
 
         {/* TAB 2: MY CLOUD FILES */}
         {activeTab === 'files' && (
@@ -1788,13 +1932,26 @@ export default function App() {
 
       {/* Mobile Bottom Navigation */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-slate-950/95 backdrop-blur-xl border-t border-slate-800 px-1 pb-[calc(env(safe-area-inset-bottom)+4px)] pt-1.5">
-        <div className="grid grid-cols-3 items-center">
+        <div className="grid grid-cols-4 items-center">
           <button
             onClick={() => { setActiveTab('search'); setIsMobileMoreOpen(false); }}
             className={`flex flex-col items-center justify-center gap-0.5 min-h-12 px-1 rounded-xl transition ${activeTab === 'search' ? 'text-cyan-400' : 'text-slate-400'}`}
           >
             <Search className="w-5 h-5" />
             <span className="text-[9px] font-semibold">Search</span>
+          </button>
+
+          <button
+            onClick={() => { setActiveTab('transfers'); setIsMobileMoreOpen(false); }}
+            className={`relative flex flex-col items-center justify-center gap-0.5 min-h-12 px-1 rounded-xl transition ${activeTab === 'transfers' ? 'text-cyan-400' : 'text-slate-400'}`}
+          >
+            <Download className="w-5 h-5" />
+            <span className="text-[9px] font-semibold">Transfers</span>
+            {activeDownloadsCount > 0 && (
+              <span className="absolute top-0.5 right-[23%] min-w-4 h-4 px-1 rounded-full bg-cyan-500 text-slate-950 text-[8px] font-black flex items-center justify-center">
+                {activeDownloadsCount}
+              </span>
+            )}
           </button>
 
           <button
