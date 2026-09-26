@@ -438,22 +438,47 @@ async def inspect_magnet(body: dict[str, Any]):
 
 @app.post("/api/v2/torrents/upload-torrent")
 async def upload_torrent(body: dict[str, Any]):
+    import bencodepy
+
     encoded = str(body.get("base64") or "")
     filename = str(body.get("filename") or "upload.torrent")
     if not encoded:
         raise HTTPException(400, "base64 is required")
     try:
-        data = __import__("base64").b64decode(encoded)
+        data = base64.b64decode(encoded)
+        decoded = bencodepy.decode(data)
+        info = decoded[b"info"]
+        info_hash = hashlib.sha1(bencodepy.encode(info)).hexdigest()
+        name_value = info.get(b"name") or b"Torrent"
+        name = name_value.decode("utf-8", errors="replace") if isinstance(name_value, bytes) else str(name_value)
+        raw_files = info.get(b"files")
+        entries = []
+        if raw_files:
+            for index, item in enumerate(raw_files):
+                parts = item.get(b"path") or []
+                parts = [p.decode("utf-8", errors="replace") if isinstance(p, bytes) else str(p) for p in parts]
+                relative = "/".join(parts)
+                entries.append({"index": index, "name": relative, "size": int(item.get(b"length", 0)), "path": relative, "type": file_type(relative), "priority": 1})
+        else:
+            entries.append({"index": 0, "name": name, "size": int(info.get(b"length", 0)), "path": name, "type": file_type(name), "priority": 1})
     except Exception as exc:
-        raise HTTPException(400, "Invalid torrent file") from exc
+        raise HTTPException(400, "Invalid torrent descriptor") from exc
+
     response = await qbt.request(
         "POST", "/api/v2/torrents/add",
         files={"torrents": (filename, data, "application/x-bittorrent")},
         data={"savepath": "/downloads", "autoTMM": "false", "paused": "true"},
     )
-    if response.status_code >= 400:
+    if response.status_code >= 400 and response.status_code != 409:
         raise HTTPException(response.status_code, response.text)
-    return {"name": Path(filename).stem, "hash": "", "files": [], "totalSize": len(data), "magnetUri": ""}
+
+    return {
+        "name": name,
+        "hash": info_hash,
+        "files": entries,
+        "totalSize": sum(x["size"] for x in entries),
+        "magnetUri": f"magnet:?xt=urn:btih:{info_hash}&dn={quote(name)}",
+    }
 
 
 @app.post("/api/torrents/metadata")
