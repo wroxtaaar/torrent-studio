@@ -87,6 +87,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       setMagnetInput('');
       setInspectedFiles([]);
       setInspectedHash('');
+      setInspectedTorrentName('');
       setInspectionSource('');
       setCopiedMagnet(false);
     }
@@ -108,6 +109,31 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     return 'other';
   };
 
+  const inferTorrentName = (
+    files: { name: string; path?: string }[],
+    fallback = ''
+  ): string => {
+    if (fallback.trim()) return fallback.trim();
+
+    if (!files.length) return '';
+
+    // Multi-file torrents commonly expose paths like:
+    // "Torrent Folder Name/Season 1/Episode.mkv".
+    // Use the common first path segment as the folder/torrent name.
+    const segments = files
+      .map(file => String(file.path || file.name || '').replace(/\\/g, '/').split('/').filter(Boolean))
+      .filter(parts => parts.length > 1);
+
+    if (segments.length === files.length) {
+      const first = segments[0][0];
+      if (first && segments.every(parts => parts[0] === first)) {
+        return first;
+      }
+    }
+
+    return String(files[0]?.name || '').replace(/\\/g, '/').split('/').filter(Boolean)[0] || '';
+  };
+
   const applyFileList = (files: { index: number; name: string; size: number; path?: string; type?: string; priority?: number }[]) => {
     const singleFile = files.length === 1;
     setInspectedFiles(
@@ -120,6 +146,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       }))
     );
     setCustomFileCount(files.length);
+    setInspectedTorrentName(prev => prev || inferTorrentName(files));
   };
 
   const startSingleFileDownload = async (
@@ -227,7 +254,13 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
         setInspectedTorrentName(String(data.name || '').trim());
 
         if (data.files.length === 1) {
-           await startSingleFileDownload(resolvedSource, data.files, hash, null, String(data.name || '').trim());
+           await startSingleFileDownload(
+             resolvedSource,
+             data.files,
+             hash,
+             null,
+             inferTorrentName(data.files, String(data.name || '').trim())
+           );
           return;
         }
 
@@ -261,11 +294,17 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
               priority: f.priority
             }));
             setInspectedHash(hash);
-            setInspectedTorrentName(String((files as any).torrentName || (files as any).name || '').trim());
+            setInspectedTorrentName(prev => prev || inferTorrentName(normalizedFiles));
             applyFileList(normalizedFiles);
 
             if (normalizedFiles.length === 1) {
-              await startSingleFileDownload(source, normalizedFiles, hash, null, inspectedTorrentName);
+              await startSingleFileDownload(
+                source,
+                normalizedFiles,
+                hash,
+                null,
+                inferTorrentName(normalizedFiles, inspectedTorrentName)
+              );
               return;
             }
 
