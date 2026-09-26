@@ -319,13 +319,17 @@ export default function App() {
       try {
         const result = await api.getSeedrTask(seedrNotice.taskId!);
         if (!active) return;
-        setSeedrNotice(prev => prev ? {
-          ...prev,
-          status: result.status,
-          progress: result.progress,
-          downloadUrl: result.downloadUrl,
-          files: result.files || [],
-        } : null);
+        setSeedrNotice(prev => {
+          if (!prev) return null;
+          const completed = result.status === 'completed' || Number(result.progress) >= 100;
+          return {
+            ...prev,
+            status: completed ? 'completed' : result.status,
+            progress: completed ? 100 : result.progress,
+            downloadUrl: result.downloadUrl,
+            files: result.files || [],
+          };
+        });
       } catch {
         // Keep the current status and retry on the next poll.
       }
