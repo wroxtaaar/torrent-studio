@@ -152,18 +152,38 @@ export const api = {
     return res.json();
   },
 
+  async prepareSeedrMagnet(magnet: string): Promise<{
+    taskId: number | string;
+    name: string;
+    files: Array<{ id: string; name: string; size: number }>;
+    created?: boolean;
+    paused?: boolean;
+  }> {
+    const res = await fetch('/api/seedr/tasks/prepare', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ magnet })
+    });
+    const body = await res.text();
+    let data: any = null;
+    try { data = body ? JSON.parse(body) : null; } catch {}
+    if (!res.ok) throw new Error(data?.error || body || 'Failed to prepare Seedr task');
+    return data;
+  },
+
   async addMagnet(
     urls: string,
     category = 'Downloads',
     selectedFiles?: number[],
     manifest?: { name: string; size: number; priority: number }[],
     existingHash?: string,
-    forceBackend?: 'seedr' | 'qbittorrent'
+    forceBackend?: 'seedr' | 'qbittorrent',
+    selectedNames?: string[]
   ): Promise<{ backend?: 'seedr' | 'qbittorrent'; seedrTaskId?: number | null; seedrResponse?: any }> {
     const res = await fetch('/api/v2/torrents/add', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ urls, category, selectedFiles, manifest, existingHash, forceBackend })
+      body: JSON.stringify({ urls, category, selectedFiles, manifest, existingHash, forceBackend, selectedNames })
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
@@ -257,6 +277,16 @@ export const api = {
     let data: any = null;
     try { data = body ? JSON.parse(body) : null; } catch { data = null; }
     if (!res.ok) throw new Error(data?.error || body || 'Failed to delete Seedr folder');
+  },
+
+  async deleteSeedrTask(taskId: number | string): Promise<void> {
+    const res = await fetch('/api/seedr/tasks/' + encodeURIComponent(String(taskId)), { method: 'DELETE' });
+    const body = await res.text();
+    if (!res.ok) {
+      let data: any = null;
+      try { data = body ? JSON.parse(body) : null; } catch {}
+      throw new Error(data?.error || body || 'Failed to delete Seedr task');
+    }
   },
 
   async deleteSeedrFile(fileId: string): Promise<void> {
