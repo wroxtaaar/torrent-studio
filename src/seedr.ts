@@ -408,6 +408,10 @@ export async function getSeedrFileDownload(fileId: string | number): Promise<{ u
   return getDownloadUrl(fileId);
 }
 
+export async function deleteSeedrFile(fileId: string | number): Promise<void> {
+  await seedrRequest(`/fs/file/${encodeURIComponent(String(fileId))}`, 'DELETE');
+}
+
 export function seedrMaxSizeBytes(): number {
   return SEEDR_MAX_SIZE_BYTES;
 }
