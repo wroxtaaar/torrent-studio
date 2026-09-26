@@ -30,7 +30,7 @@ async function seedrRequest(
   // Seedr's API lives under /api/v0.1/p, so normalize both sides before
   // resolving the endpoint.
   const baseUrl = SEEDR_API_BASE.endsWith('/') ? SEEDR_API_BASE : SEEDR_API_BASE + '/';
-  const requestPath = String(path).replace(/^\\/+/, '');
+  const requestPath = String(path).replace(/^\/+/, '');
   const response = await fetch(new URL(requestPath, baseUrl), {
     method,
     headers: {
