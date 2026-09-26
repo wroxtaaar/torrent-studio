@@ -202,6 +202,15 @@ export const api = {
     return data;
   },
 
+  async getSeedrFileStream(fileId: string, type: 'video' | 'audio'): Promise<{ url: string; name: string }> {
+    const res = await fetch('/api/seedr/files/' + encodeURIComponent(fileId) + '/stream?type=' + encodeURIComponent(type));
+    const body = await res.text();
+    let data: any = null;
+    try { data = body ? JSON.parse(body) : null; } catch { data = null; }
+    if (!res.ok) throw new Error(data?.error || body || 'Failed to create Seedr stream URL');
+    return data;
+  },
+
   async deleteSeedrFile(fileId: string): Promise<void> {
     const res = await fetch('/api/seedr/files/' + encodeURIComponent(fileId), { method: 'DELETE' });
     const body = await res.text();
