@@ -173,13 +173,18 @@ export default function App() {
   }));
 
   const seedrFolderGroups = useMemo(() => {
-    const groups = new Map<string, {
+    type SeedrDisplayFile = typeof seedrDisplayFiles[number];
+    type SeedrFolderGroup = {
       folderId: string;
       name: string;
       path: string;
-      files: typeof seedrFiles;
+      files: SeedrDisplayFile[];
       totalSize: number;
-    }>();
+      active?: boolean;
+      progress?: number;
+    };
+
+    const groups = new Map<string, SeedrFolderGroup>();
 
     for (const file of seedrDisplayFiles) {
       const folderId = file.folderId || '__root__';
@@ -202,8 +207,43 @@ export default function App() {
       }
     }
 
-    return Array.from(groups.values()).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
-  }, [seedrDisplayFiles]);
+    // Put the currently downloading Seedr task directly into the library as
+    // a folder row. This prevents a duplicate "Downloading with Seedr" card
+    // above the library and gives the folder row its live progress.
+    if (seedrNotice?.taskId != null && seedrNotice.status !== 'completed') {
+      const activeFolderId = '__active_seedr__';
+      const activeName =
+        seedrNotice.folderName?.trim() ||
+        seedrNotice.name?.trim() ||
+        'Seedr download';
+
+      const activeFiles: SeedrDisplayFile[] = (seedrNotice.files || []).map(file => ({
+        id: file.id,
+        name: file.name,
+        size: file.size,
+        folderId: activeFolderId,
+        folderPath: '/Currently Downloading',
+        downloadProgress: Number(seedrNotice.progress) || 0,
+        downloading: true,
+      }));
+
+      groups.set(activeFolderId, {
+        folderId: activeFolderId,
+        name: activeName,
+        path: '/Currently Downloading/' + activeName,
+        files: activeFiles,
+        totalSize: activeFiles.reduce((sum, file) => sum + file.size, 0),
+        active: true,
+        progress: Math.max(0, Math.min(100, Number(seedrNotice.progress) || 0)),
+      });
+    }
+
+    return Array.from(groups.values()).sort((a, b) => {
+      if (a.active && !b.active) return -1;
+      if (!a.active && b.active) return 1;
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+    });
+  }, [seedrDisplayFiles, seedrNotice]);
 
   useEffect(() => {
     if (selectedSeedrFolderId !== null && !seedrFolderGroups.some(folder => folder.folderId === selectedSeedrFolderId)) {
@@ -1406,201 +1446,6 @@ export default function App() {
                   <span>{seedrDeleteNotice}</span>
                 </div>
               )}
-              {seedrNotice?.taskId != null && seedrNotice.status !== 'completed' && (
-                <div className="mb-3 rounded-xl bg-slate-900/80 border border-emerald-500/25 shadow-lg shadow-emerald-500/5 overflow-hidden">
-                  {seedrNotice.files.length > 1 && activeSeedrFolderOpen ? (
-                    <div className="p-3.5">
-                      <div className="flex items-center justify-between gap-3">
-                        <button
-                          type="button"
-                          onClick={() => setActiveSeedrFolderOpen(false)}
-                          className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition"
-                        >
-                          ← Back
-                        </button>
-                        <div className="min-w-0 flex-1 text-center">
-                          <div className="flex items-center justify-center gap-2">
-                            <Folder className="w-4 h-4 text-cyan-400 shrink-0" />
-                            <span className="text-sm font-semibold text-slate-100 truncate">{seedrNotice.name}</span>
-                          </div>
-                        </div>
-                        <div className="shrink-0 flex items-center gap-2">
-                          <span className="font-mono text-[11px] text-emerald-300">
-                            {Number(seedrNotice.progress).toFixed(2).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '')}%
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => void handleCancelSeedrDownload()}
-                            disabled={isCancellingSeedr || seedrNotice.taskId == null}
-                            className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/25 text-rose-300 hover:bg-rose-500/20 disabled:opacity-40 disabled:cursor-not-allowed text-[10px] font-bold transition"
-                          >
-                            {isCancellingSeedr ? 'Cancelling…' : 'Cancel'}
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="mt-2 h-1.5 rounded-full bg-slate-800 overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-emerald-400 transition-all duration-500"
-                          style={{ width: Math.max(0, Math.min(100, Number(seedrNotice.progress) || 0)) + '%' }}
-                        />
-                      </div>
-
-                      <div className="mt-3 space-y-2">
-                        {seedrNotice.files
-                          .slice()
-                          .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
-                          .map(file => {
-                            const isMedia = /\.(mkv|mp4|m4v|webm|mov|avi|m3u8|ts|mp3|wav|flac|aac|ogg|m4a)$/i.test(file.name);
-                            return (
-                              <div
-                                key={file.id}
-                                className="flex items-center justify-between gap-3 rounded-xl bg-slate-950/50 border border-slate-800 px-3 py-2.5"
-                              >
-                                <div className="min-w-0 flex-1">
-                                  <div className="truncate text-sm font-medium text-slate-200">{file.name}</div>
-                                  <div className="text-[10px] text-slate-500 mt-0.5">
-                                    {formatBytes(file.size)} • {file.url ? 'Ready' : 'Downloading…'}
-                                  </div>
-                                  <div className="mt-1.5 flex items-center gap-2 max-w-sm">
-                                    <div className="h-1.5 flex-1 rounded-full bg-slate-800 overflow-hidden">
-                                      <div
-                                        className="h-full rounded-full bg-emerald-400 transition-all duration-500"
-                                        style={{ width: Math.max(0, Math.min(100, Number(seedrNotice.progress) || 0)) + '%' }}
-                                      />
-                                    </div>
-                                    <span className="shrink-0 text-[10px] font-mono font-semibold text-emerald-300">
-                                      {Number(seedrNotice.progress).toFixed(2).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '')}%
-                                    </span>
-                                  </div>
-                                </div>
-                                {file.url ? (
-                                  <div className="shrink-0 flex items-center gap-1.5">
-                                    {isMedia && (
-                                      <button
-                                        type="button"
-                                        onClick={() => void handleStreamSeedrFile(file)}
-                                        className="px-2.5 py-1.5 rounded-lg bg-cyan-500 text-slate-950 font-bold text-xs hover:bg-cyan-400 transition"
-                                      >
-                                        Stream
-                                      </button>
-                                    )}
-                                    <button
-                                      type="button"
-                                      onClick={() => void handleDownloadSeedrFile(file.id)}
-                                      className="px-2.5 py-1.5 rounded-lg bg-emerald-400 text-slate-950 font-bold text-xs hover:bg-emerald-300 transition"
-                                    >
-                                      Download
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <span className="shrink-0 text-[10px] font-semibold text-slate-500">
-                                    Preparing…
-                                  </span>
-                                )}
-                              </div>
-                            );
-                          })}
-                      </div>
-                    </div>
-                  ) : (
-                    (() => {
-                      const file = seedrNotice.files.length === 1 ? seedrNotice.files[0] : null;
-                      const isMedia = Boolean(file && /\.(mkv|mp4|m4v|webm|mov|avi|m3u8|ts|mp3|wav|flac|aac|ogg|m4a)$/i.test(file.name));
-                      return (
-                        <div className="p-3.5">
-                          <div className="flex items-center gap-3">
-                            <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/20 shrink-0">
-                              {file ? <File className="w-5 h-5 text-cyan-400" /> : <Cloud className="w-5 h-5 text-emerald-400" />}
-                            </div>
-
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs font-bold text-emerald-300">Downloading with Seedr</span>
-                                <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                  {seedrNotice.status === 'waiting' ? 'Waiting' : 'Downloading'}
-                                </span>
-                              </div>
-                              <div className="text-sm font-semibold text-slate-100 mt-1 truncate">
-                                {seedrNotice.folderName || seedrNotice.name || 'Seedr download'}
-                              </div>
-                              <div className="text-[10px] text-slate-500 mt-0.5">
-                                {file ? formatBytes(file.size) : 'Resolving torrent files'}
-                              </div>
-                              <div className="mt-1.5 flex items-center gap-2 max-w-sm">
-                                <div className="h-1.5 flex-1 rounded-full bg-slate-800 overflow-hidden">
-                                  <div
-                                    className="h-full rounded-full bg-emerald-400 transition-all duration-500"
-                                    style={{ width: Math.max(0, Math.min(100, Number(seedrNotice.progress) || 0)) + '%' }}
-                                  />
-                                </div>
-                                <span className="shrink-0 text-[10px] font-mono font-semibold text-emerald-300">
-                                  {Number(seedrNotice.progress).toFixed(2).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '')}%
-                                </span>
-                              </div>
-                            </div>
-
-                            <div className="shrink-0 flex items-center gap-2">
-                              <span className="font-mono text-[11px] text-emerald-300">
-                                {Number(seedrNotice.progress).toFixed(2).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '')}%
-                              </span>
-                              {file?.url && (
-                                <>
-                                  {isMedia && (
-                                    <button
-                                      type="button"
-                                      onClick={() => void handleStreamSeedrFile(file)}
-                                      className="px-2.5 py-1.5 rounded-lg bg-cyan-500 text-slate-950 font-bold text-xs hover:bg-cyan-400 transition"
-                                    >
-                                      Stream
-                                    </button>
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={() => void handleDownloadSeedrFile(file.id)}
-                                    className="px-2.5 py-1.5 rounded-lg bg-emerald-400 text-slate-950 font-bold text-xs hover:bg-emerald-300 transition"
-                                  >
-                                    Download
-                                  </button>
-                                </>
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => void handleCancelSeedrDownload()}
-                                disabled={isCancellingSeedr || seedrNotice.taskId == null}
-                                className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/25 text-rose-300 hover:bg-rose-500/20 disabled:opacity-40 disabled:cursor-not-allowed text-[10px] font-bold transition"
-                              >
-                                {isCancellingSeedr ? 'Cancelling…' : 'Cancel'}
-                              </button>
-                            </div>
-                          </div>
-
-                          {seedrNotice.files.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => setActiveSeedrFolderOpen(true)}
-                              className="mt-3 w-full flex items-center justify-between gap-3 rounded-xl bg-slate-950/50 border border-slate-800 px-3 py-2 text-left hover:border-cyan-500/30 transition"
-                            >
-                              <span className="text-xs text-slate-300">
-                                <strong>{seedrNotice.files.length} files</strong> in this torrent
-                              </span>
-                              <span className="text-xs font-semibold text-cyan-400">Open folder →</span>
-                            </button>
-                          )}
-
-                          <div className="mt-3 h-1.5 rounded-full bg-slate-800 overflow-hidden">
-                            <div
-                              className="h-full rounded-full bg-emerald-400 transition-all duration-500"
-                              style={{ width: Math.max(0, Math.min(100, Number(seedrNotice.progress) || 0)) + '%' }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })()
-                  )}
-                </div>
-              )}
-
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="min-w-0">
                   <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
@@ -1687,7 +1532,7 @@ export default function App() {
                           <div className="flex items-center gap-2.5">
                             <button
                               type="button"
-                              onClick={() => folder.folderId !== '__root__' && setSelectedSeedrFolderId(folder.folderId)}
+                              onClick={() => !folder.active && folder.folderId !== '__root__' && setSelectedSeedrFolderId(folder.folderId)}
                               className="min-w-0 flex-1 text-left flex items-center gap-3"
                               disabled={folder.folderId === '__root__'}
                             >
@@ -1699,11 +1544,24 @@ export default function App() {
                                 <div className="text-[10px] text-slate-500 mt-0.5">
                                   {folder.files.length} file{folder.files.length === 1 ? '' : 's'} • {formatBytes(folder.totalSize)}
                                 </div>
+                                {folder.active && (
+                                  <div className="mt-1.5 flex items-center gap-2">
+                                    <div className="h-1.5 flex-1 rounded-full bg-slate-800 overflow-hidden">
+                                      <div
+                                        className="h-full rounded-full bg-emerald-400 transition-all duration-500"
+                                        style={{ width: `${folder.progress ?? 0}%` }}
+                                      />
+                                    </div>
+                                    <span className="shrink-0 text-[10px] font-mono font-semibold text-emerald-300">
+                                      {Number(folder.progress ?? 0).toFixed(2).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '')}%
+                                    </span>
+                                  </div>
+                                )}
                               </div>
-                              {folder.folderId !== '__root__' && <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />}
+                              {folder.folderId !== '__root__' && !folder.active && <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />}
                             </button>
 
-                            {folder.folderId !== '__root__' && (
+                            {folder.folderId !== '__root__' && !folder.active && (
                               <div className="flex items-center gap-1.5 shrink-0">
                                 <button
                                   type="button"
