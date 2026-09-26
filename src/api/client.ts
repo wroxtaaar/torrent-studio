@@ -192,12 +192,13 @@ export const api = {
     existingHash?: string,
     forceBackend?: 'seedr' | 'qbittorrent',
     selectedNames?: string[],
-    seedrTaskId?: number | string
+    seedrTaskId?: number | string,
+    torrentName?: string
   ): Promise<{ backend?: 'seedr' | 'qbittorrent'; seedrTaskId?: number | null; seedrResponse?: any; seedrFolderName?: string | null; seedrFolderId?: string | null }> {
     const res = await fetch('/api/v2/torrents/add', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ urls, category, selectedFiles, manifest, existingHash, forceBackend, selectedNames, seedrTaskId })
+      body: JSON.stringify({ urls, category, selectedFiles, manifest, existingHash, forceBackend, selectedNames, seedrTaskId, torrentName })
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
