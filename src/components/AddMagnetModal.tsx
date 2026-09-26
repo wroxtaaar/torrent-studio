@@ -214,7 +214,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
 
   // Add the torrent paused first, then poll qBittorrent's real file list.
   // This avoids relying on fetchMetadata returning a complete descriptor.
-  const triggerInspect = async (link: string) => {
+  const triggerInspect = async (link: string, background = false) => {
     const source = link.trim();
     if (!source) {
       setInspectedFiles([]);
@@ -224,7 +224,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
 
     try {
       setIsInspecting(true);
-      setBackgroundMode(true);
+      setBackgroundMode(background);
       setError('');
       setInspectedFiles([]);
 
@@ -343,7 +343,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     setInspectedFiles([]);
     setInspectionSource('');
     setError('');
-    void triggerInspect(source);
+    void triggerInspect(source, false);
   }, [isOpen, initialMagnet]);
 
   const handleInputChange = (val: string) => {
@@ -473,7 +473,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     // fetching as soon as it receives a task, so multi-file magnets are
     // inspected with qBittorrent first and remain paused until confirmed.
     if (isDirectSeedrSource && inspectedFiles.length === 0) {
-      await triggerInspect(magnetInput.trim());
+      await triggerInspect(magnetInput.trim(), false);
       return;
     }
 
@@ -885,7 +885,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
               type="button"
               onClick={() => {
                 if (isDirectSeedrSource && inspectedFiles.length === 0) {
-                  void triggerInspect(magnetInput.trim());
+                  void triggerInspect(magnetInput.trim(), false);
                 } else if (isDirectSeedrSource || selectedCount > 0) {
                   void handleSubmit({ preventDefault: () => {} } as React.FormEvent);
                 } else if (magnetInput.trim() && !isInspecting) {
