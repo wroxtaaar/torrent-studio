@@ -532,7 +532,7 @@ export async function getSeedrTaskStatus(
   if (!complete) {
     return {
       taskId,
-        name: String(task?.name ?? task?.title ?? task?.torrent_name ?? ''),
+      name: String(task?.name ?? task?.title ?? task?.torrent_name ?? ''),
       status: 'downloading',
       progress,
       task,
@@ -565,6 +565,7 @@ export async function getSeedrTaskStatus(
   if (!candidates.length) {
     return {
       taskId,
+      name: String(task?.name ?? task?.title ?? task?.torrent_name ?? ''),
       status: 'downloading',
       progress: Math.min(progress, 99.9),
       task,
