@@ -575,12 +575,84 @@ export function installQbtProxy(app: Express) {
       if (!fileName) return res.status(400).json({ error: 'name is required' });
 
       const result = await getSeedrFilePresentation(fileName, type);
-      return res.json(result);
+      const isHls = /\.m3u8(?:$|\?)/i.test(result.url);
+
+      // Seedr's HLS host does not reliably expose the manifest/segments with
+      // browser CORS headers. Return a same-origin proxy URL for HLS so hls.js
+      // can load the manifest and every referenced playlist/segment through
+      // Torrent Studio.
+      const url = isHls
+        ? `/api/seedr/hls/master.m3u8?url=${encodeURIComponent(result.url)}`
+        : result.url;
+
+      return res.json({ url, name: result.name });
     } catch (error: any) {
       console.error('[SEEDR] Stream URL failed:', error?.message || error);
       return res.status(Number(error?.status) || 502).json({
         error: error?.message || 'Seedr stream URL failed'
       });
+    }
+  });
+
+  app.get('/api/seedr/hls/master.m3u8', async (req: Request, res: Response) => {
+    try {
+      const target = String(req.query.url || '').trim();
+      if (!target) return res.status(400).send('url is required');
+
+      const parsed = new URL(target);
+      if (!parsed.hostname.endsWith('.seedr.cc') && parsed.hostname !== 'seedr.cc') {
+        return res.status(400).send('Only Seedr stream URLs are allowed');
+      }
+
+      const upstream = await fetch(target, {
+        headers: { Accept: '*/*' },
+      });
+      if (!upstream.ok) {
+        return res.status(upstream.status).send(await upstream.text());
+      }
+
+      const contentType = upstream.headers.get('content-type') || '';
+      const body = await upstream.text();
+
+      if (!contentType.includes('mpegurl') && !/^#EXTM3U/m.test(body.trim())) {
+        res.setHeader('Content-Type', contentType || 'application/octet-stream');
+        return res.send(body);
+      }
+
+      const proxyBase = '/api/seedr/hls/master.m3u8?url=';
+      const rewriteUrl = (value: string) => {
+        try {
+          const absolute = new URL(value, target).toString();
+          const host = new URL(absolute).hostname;
+          if (!host.endsWith('.seedr.cc') && host !== 'seedr.cc') return value;
+          return proxyBase + encodeURIComponent(absolute);
+        } catch {
+          return value;
+        }
+      };
+
+      const rewritten = body
+        .split(/\\r?\\n/)
+        .map(line => {
+          const trimmed = line.trim();
+
+          // URI="..." attributes (EXT-X-MEDIA, EXT-X-MAP, keys, etc.).
+          if (trimmed.startsWith('#')) {
+            return line.replace(/URI="([^"]+)"/g, (_match, uri) => `URI="${rewriteUrl(uri)}"`);
+          }
+
+          // Playlist/segment URL lines.
+          return trimmed ? rewriteUrl(trimmed) : line;
+        })
+        .join('\\n');
+
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      return res.send(rewritten);
+    } catch (error: any) {
+      console.error('[SEEDR] HLS manifest proxy failed:', error?.message || error);
+      return res.status(502).send(error?.message || 'Seedr HLS manifest proxy failed');
     }
   });
 
