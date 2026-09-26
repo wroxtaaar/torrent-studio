@@ -1528,7 +1528,7 @@ export default function App() {
                               <div className="min-w-0 flex-1">
                                 <div className="truncate text-sm font-semibold text-slate-100">{folder.name}</div>
                                 <div className="text-[10px] text-slate-500 mt-0.5">
-                                  {folder.files.length} file{folder.files.length === 1 ? '' : 's'} • {formatBytes(folder.totalSize)}
+                                  {folder.files.length} file{folder.files.length === 1 ? '' : 's'} • {formatBytes(folder.totalSize)} • 100% complete
                                 </div>
                               </div>
                               {folder.folderId !== '__root__' && <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />}
@@ -1574,7 +1574,7 @@ export default function App() {
                             </button>
                             <div className="text-right min-w-0">
                               <div className="text-sm font-semibold text-slate-100 truncate">{folder.name}</div>
-                              <div className="text-[10px] text-slate-500">{folder.files.length} files • {formatBytes(folder.totalSize)}</div>
+                              <div className="text-[10px] text-slate-500">{folder.files.length} files • {formatBytes(folder.totalSize)} • 100% complete</div>
                             </div>
                             <button
                               type="button"
