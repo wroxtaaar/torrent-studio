@@ -1106,7 +1106,7 @@ export default function App() {
         {/* TAB 1: TRANSFERS & SEEDBOX */}
         {activeTab === 'transfers' && (
           <div className="space-y-4">
-            {seedrNotice && (
+            {seedrNotice?.status === 'completed' && (
               <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 text-xs space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -1180,6 +1180,40 @@ export default function App() {
                 </button>
               </div>
             </div>
+
+            {seedrNotice && seedrNotice.status !== 'completed' && (
+              <div className="p-4 rounded-2xl bg-slate-900 border border-emerald-500/25 shadow-lg shadow-emerald-500/5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <CloudDownload className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span className="text-xs font-bold text-emerald-300">Downloading with Seedr</span>
+                      <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        {seedrNotice.status === 'waiting' ? 'Waiting' : 'Downloading'}
+                      </span>
+                    </div>
+                    <div className="text-sm font-semibold text-slate-200 mt-1 truncate">{seedrNotice.name}</div>
+                    <div className="mt-3">
+                      <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1">
+                        <span>Seedr progress</span>
+                        <span className="font-mono text-emerald-300">
+                          {Number(seedrNotice.progress).toFixed(2).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '')}%
+                        </span>
+                      </div>
+                      <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-emerald-400 transition-all duration-500"
+                          style={{ width: `${Math.max(0, Math.min(100, Number(seedrNotice.progress) || 0))}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <span className="shrink-0 font-mono text-[10px] text-slate-500">
+                    Task {seedrNotice.taskId ?? 'created'}
+                  </span>
+                </div>
+              </div>
+            )}
 
             {/* Torrents List */}
             {torrents.length === 0 ? (
