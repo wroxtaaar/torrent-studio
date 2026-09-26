@@ -44,6 +44,21 @@ function getPreviewTorrent(source: string): string {
   return entry.hash;
 }
 
+function isPreviewTorrentHash(hash: string): boolean {
+  const normalizedHash = String(hash || '').trim().toLowerCase();
+  if (!normalizedHash) return false;
+
+  for (const [source, entry] of previewTorrentHashes) {
+    if (entry.expiresAt <= Date.now()) {
+      previewTorrentHashes.delete(source);
+      continue;
+    }
+    if (entry.hash.toLowerCase() === normalizedHash) return true;
+  }
+
+  return false;
+}
+
 
 function requireConfig() {
   if (!config.baseUrl) throw new Error('QBT_URL is not configured');
@@ -808,7 +823,9 @@ export function installQbtProxy(app: Express) {
           if (typeof value === 'string') upstream.searchParams.set(key, value);
         }
         const list = await qbtJson(upstream.pathname + upstream.search);
-        const mapped = Array.isArray(list) ? list.map(mapTorrent) : [];
+        const mapped = Array.isArray(list)
+          ? list.map(mapTorrent).filter((torrent: any) => !isPreviewTorrentHash(torrent.hash))
+          : [];
         for (const torrent of mapped) {
           if (!torrent.files.length) {
             try { torrent.files = await getFiles(torrent.hash); } catch { /* keep list usable */ }
