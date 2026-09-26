@@ -1,7 +1,7 @@
 import bencode from 'bencode';
 import crypto from 'crypto';
 import type { Express, Request, Response, NextFunction } from 'express';
-import { addSeedrTask, canUseSeedr, getSeedrTaskStatus, getSeedrFileDownload, getSeedrFilePresentation, deleteSeedrFile, deleteSeedrFolder, getSeedrFolderDownload, isSeedrConfigured, listSeedrLibrary, seedrMaxSizeBytes } from './seedr.ts';
+import { addSeedrTask, canUseSeedr, getSeedrTaskStatus, getSeedrFileDownload, getSeedrFilePresentation, deleteSeedrFile, deleteSeedrFolder, getSeedrFolderDownload, getSeedrQuota, isSeedrConfigured, listSeedrLibrary, seedrMaxSizeBytes } from './seedr.ts';
 
 type QbtConfig = {
   baseUrl: string;
@@ -861,8 +861,17 @@ export function installQbtProxy(app: Express) {
         });
       }
 
+      if (route === '/seedr/quota' && method === 'GET') {
+        if (!isSeedrConfigured()) {
+          return res.json({ configured: false, maxSpace: 0, usedSpace: 0, remainingSpace: 0 });
+        }
+        const quota = await getSeedrQuota();
+        return res.json({ configured: true, ...quota });
+      }
+
       if (route === '/torrents/add' && method === 'POST') {
         const body = req.body as any;
+        const forceBackend = String(body?.forceBackend || '').toLowerCase();
         const urls = String(body?.urls || '').trim();
         if (!urls) return res.status(400).send('No magnet link or URL provided');
 
@@ -886,9 +895,26 @@ export function installQbtProxy(app: Express) {
         // is expired, or the account rejects the operation, transparently fall
         // back to the existing qBittorrent flow.
         const totalManifestSize = manifest.reduce((sum: number, item: any) => sum + Number(item?.size || 0), 0);
-        const seedrEligible = canUseSeedr(totalManifestSize);
+        const seedrEligible = forceBackend !== 'qbittorrent' && canUseSeedr(totalManifestSize);
         if (seedrEligible) {
           try {
+            let quota: { maxSpace: number; usedSpace: number; remainingSpace: number } | null = null;
+            try {
+              quota = await getSeedrQuota();
+            } catch (quotaError: any) {
+              console.warn('[HYBRID] Could not read Seedr quota; will attempt Seedr directly:', quotaError?.message || quotaError);
+            }
+
+            if (quota && totalManifestSize > quota.remainingSpace) {
+              return res.status(409).json({
+                error: 'Seedr does not have enough free space for this torrent.',
+                code: 'SEEDR_INSUFFICIENT_SPACE',
+                requiredBytes: totalManifestSize,
+                usedSpace: quota.usedSpace,
+                maxSpace: quota.maxSpace,
+                remainingSpace: quota.remainingSpace,
+              });
+            }
             const seedrSource = /^magnet:\?/i.test(urls) ? urls : (sourceHash || existingHash ? `magnet:?xt=urn:btih:${(sourceHash || existingHash).toLowerCase()}` : urls);
             const seedrTask = await addSeedrTask(seedrSource);
             const previewHash = existingHash || rememberedHash || sourceHash;
@@ -919,7 +945,7 @@ export function installQbtProxy(app: Express) {
           } catch (seedrError: any) {
             console.warn('[HYBRID] Seedr unavailable; falling back to qBittorrent:', seedrError?.message || seedrError);
           }
-        } else if (isSeedrConfigured()) {
+        } else if (isSeedrConfigured() && forceBackend !== 'qbittorrent') {
           console.log('[HYBRID] Torrent exceeds Seedr limit; using qBittorrent.');
         }
 
