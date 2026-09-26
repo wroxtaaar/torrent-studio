@@ -13,7 +13,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
