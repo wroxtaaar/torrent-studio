@@ -1,7 +1,7 @@
 import bencode from 'bencode';
 import crypto from 'crypto';
 import type { Express, Request, Response, NextFunction } from 'express';
-import { addSeedrTask, pauseSeedrTask, resumeSeedrTask, getSeedrTaskSelection, canUseSeedr, getSeedrTaskStatus, findSeedrTaskByHash, getSeedrFileDownload, getSeedrFilePresentation, deleteSeedrFile, deleteSeedrFolder, getSeedrFolderDownload, getSeedrQuota, isSeedrConfigured, listSeedrLibrary, seedrMaxSizeBytes } from './seedr.ts';
+import { addSeedrTask, pauseSeedrTask, resumeSeedrTask, getSeedrTaskSelection, deleteSeedrTask, canUseSeedr, getSeedrTaskStatus, findSeedrTaskByHash, getSeedrFileDownload, getSeedrFilePresentation, deleteSeedrFile, deleteSeedrFolder, getSeedrFolderDownload, getSeedrQuota, isSeedrConfigured, listSeedrLibrary, seedrMaxSizeBytes } from './seedr.ts';
 
 type QbtConfig = {
   baseUrl: string;
@@ -577,18 +577,39 @@ export function installQbtProxy(app: Express) {
         }
       }
 
-      const selection = await getSeedrTaskSelection(taskId);
+      let selection = await getSeedrTaskSelection(taskId);
+      for (let attempt = 0; attempt < 10 && selection.files.length === 0; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        selection = await getSeedrTaskSelection(taskId);
+      }
+
       return res.json({
         taskId,
         name: String(selection.task?.name ?? selection.task?.title ?? ''),
         files: selection.files,
         created,
-        paused: true,
+        paused: created,
       });
     } catch (error: any) {
       console.error('[SEEDR] Prepare task failed:', error?.message || error);
       return res.status(Number(error?.status) || 502).json({
         error: error?.message || 'Failed to prepare Seedr task'
+      });
+    }
+  });
+
+  app.delete('/api/seedr/tasks/:taskId', async (req: Request, res: Response) => {
+    try {
+      const taskId = String(req.params.taskId || '').trim();
+      if (!taskId) return res.status(400).json({ error: 'taskId is required' });
+      if (!isSeedrConfigured()) return res.status(503).json({ error: 'Seedr is not configured' });
+      await deleteSeedrTask(taskId);
+      seedrJobs.delete(taskId);
+      return res.status(204).end();
+    } catch (error: any) {
+      console.error('[SEEDR] Delete task failed:', error?.message || error);
+      return res.status(Number(error?.status) || 502).json({
+        error: error?.message || 'Failed to delete Seedr task'
       });
     }
   });
