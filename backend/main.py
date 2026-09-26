@@ -502,10 +502,12 @@ async def torrents_add(body: dict[str, Any]):
                 except Exception as exc:
                     selection_error = str(exc)
 
+            seedr_folder_name = await _seedr_folder_name(seedr_task_id)
             return {
                 "backend": "seedr",
                 "seedrTaskId": int(seedr_task_id) if seedr_task_id.isdigit() else seedr_task_id,
                 "seedrResponse": {"user_torrent_id": seedr_task_id, "success": True, "reused": True},
+                "seedrFolderName": seedr_folder_name,
                 "existingHash": existing_hash or None,
                 "selectionApplied": selection_applied,
                 "selectionError": selection_error,
@@ -560,10 +562,12 @@ async def torrents_add(body: dict[str, Any]):
             except Exception as exc:
                 selection_error = str(exc)
 
+        seedr_folder_name = await _seedr_folder_name(task_id)
         return {
             "backend": "seedr",
             "seedrTaskId": int(task_id) if task_id.isdigit() else task_id,
             "seedrResponse": seedr_result,
+            "seedrFolderName": seedr_folder_name,
             "existingHash": existing_hash or None,
             "selectionApplied": selection_applied,
             "selectionError": selection_error,
@@ -1569,46 +1573,56 @@ async def _seedr_folder_name(folder_id: str) -> str:
             await seedr_request(f"/fs/folder/{quote(folder_id)}/contents")
         )
     except HTTPException:
+        return {}
+
+    def direct_name(value: Any) -> str:
+        if not isinstance(value, dict):
+            return ""
+        # Only inspect dictionaries that look like folder metadata. Never
+        # recurse into arbitrary file objects, otherwise the first filename
+        # could be mistaken for the folder name.
+        object_id = str(
+            value.get("id")
+            or value.get("folder_id")
+            or value.get("folderId")
+            or ""
+        ).strip()
+        for key in ("name", "title", "folder_name", "folderName", "path"):
+            name = str(value.get(key) or "").strip()
+            if name and (object_id == folder_id or not object_id):
+                return Path(name.rstrip("/")).name
         return ""
 
-    def find_name(value: Any) -> str:
-        if isinstance(value, dict):
-            # Prefer metadata belonging to the requested folder.
+    if isinstance(payload, dict):
+        found = direct_name(payload)
+        if found:
+            return found
+
+        for key in ("folder", "directory", "folder_info", "folderInfo"):
+            child = payload.get(key)
+            found = direct_name(child)
+            if found:
+                return found
+
+            if isinstance(child, dict):
+                nested = child.get("folder") or child.get("directory")
+                found = direct_name(nested)
+                if found:
+                    return found
+
+        # Some responses put folder metadata inside data, but still keep the
+        # folder object identifiable by the requested ID.
+        data = payload.get("data")
+        if isinstance(data, dict):
+            found = direct_name(data)
+            if found:
+                return found
             for key in ("folder", "directory", "folder_info", "folderInfo"):
-                child = value.get(key)
-                if isinstance(child, dict):
-                    child_id = str(
-                        child.get("id")
-                        or child.get("folder_id")
-                        or child.get("folderId")
-                        or ""
-                    ).strip()
-                    if not child_id or child_id == folder_id:
-                        for name_key in ("name", "title", "folder_name", "folderName", "path"):
-                            name = str(child.get(name_key) or "").strip()
-                            if name:
-                                return Path(name.rstrip("/")).name
-
-            for key in ("name", "folder_name", "folderName", "title", "path"):
-                name = str(value.get(key) or "").strip()
-                if name and not name.lower().startswith(("http://", "https://")):
-                    return Path(name.rstrip("/")).name
-
-            # Some responses nest the folder metadata under data/items.
-            for child in value.values():
-                found = find_name(child)
+                found = direct_name(data.get(key))
                 if found:
                     return found
 
-        elif isinstance(value, list):
-            for child in value:
-                found = find_name(child)
-                if found:
-                    return found
-
-        return ""
-
-    return find_name(payload)
+    return ""
 
 
 async def _seedr_task_from_list(task_id: str) -> dict[str, Any]:
