@@ -1526,9 +1526,10 @@ async def _seedr_file_details(file_id: str) -> dict[str, Any]:
 
 
 async def _seedr_progress(task_id: str, task: dict[str, Any]) -> tuple[float, dict[str, Any]]:
+    # The task object can lag behind Seedr's dedicated live-progress endpoint.
+    # Always consult /progress first so the UI reflects the current download
+    # percentage, then fall back to the task's embedded progress on failure.
     direct = _seedr_progress_value(task.get("progress"))
-    if direct is not None and direct > 0:
-        return min(100, max(0, direct)), task
     try:
         result = _seedr_data(await seedr_request(f"/tasks/{quote(str(task_id))}/progress"))
         progress_url = ""
@@ -1536,7 +1537,10 @@ async def _seedr_progress(task_id: str, task: dict[str, Any]) -> tuple[float, di
             progress_url = str(result.get("url") or result.get("progress_url") or result.get("progressUrl") or "")
         if progress_url:
             async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-                response = await client.get(progress_url, headers={"Accept": "application/json, text/plain, */*"})
+                response = await client.get(
+                    progress_url,
+                    headers={"Accept": "application/json, text/plain, */*"}
+                )
             if response.status_code < 400:
                 text = response.text
                 try:
@@ -1549,13 +1553,20 @@ async def _seedr_progress(task_id: str, task: dict[str, Any]) -> tuple[float, di
                             progress_data = json.loads(text[left:right + 1])
                         except Exception:
                             pass
-                merged = {**task, **(_seedr_data(progress_data) if isinstance(_seedr_data(progress_data), dict) else {})}
+                live_data = _seedr_data(progress_data)
+                merged = {**task, **(live_data if isinstance(live_data, dict) else {})}
                 value = _seedr_progress_value(merged)
-                return min(100, max(0, value or 0)), merged
+                if value is not None:
+                    return min(100, max(0, value)), merged
+
         merged = {**task, **(result if isinstance(result, dict) else {})}
-        return min(100, max(0, _seedr_progress_value(merged) or 0)), merged
+        value = _seedr_progress_value(merged)
+        if value is not None:
+            return min(100, max(0, value)), merged
     except Exception:
-        return min(100, max(0, direct or 0)), task
+        pass
+
+    return min(100, max(0, direct or 0)), task
 
 
 async def _seedr_set_unwanted(task_id: str, file_count: int, indexes: list[int]) -> None:
