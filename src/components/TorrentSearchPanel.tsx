@@ -170,7 +170,7 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
           </p>
         </div>
 
-        <form onSubmit={runSearch} className="mt-4 flex flex-col sm:flex-row gap-2">
+        <form data-torrent-search="true" onSubmit={runSearch} className="mt-4 flex flex-col sm:flex-row gap-2">
           <div className="relative flex-1">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
             <input
@@ -202,6 +202,13 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
                         setQuery(search);
                         setError('');
                         setShowRecentSearches(false);
+                        // A recent search is already a known-good query, so
+                        // run it immediately instead of making the user press
+                        // Search again.
+                        window.setTimeout(() => {
+                          const form = document.querySelector('form[data-torrent-search="true"]') as HTMLFormElement | null;
+                          form?.requestSubmit();
+                        }, 0);
                       }}
                       className="w-full px-3 py-2.5 text-left flex items-center gap-2.5 border-b border-slate-800/70 last:border-b-0 hover:bg-slate-800 active:bg-slate-700 transition"
                     >
