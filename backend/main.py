@@ -1003,12 +1003,16 @@ def _seedr_progress_value(value: Any, depth: int = 0) -> float | None:
 
 
 def _seedr_task_complete(task: dict[str, Any]) -> bool:
+    if not isinstance(task, dict):
+        return False
+    nested = task.get("task") if isinstance(task.get("task"), dict) else {}
     state = str(
         task.get("state") or task.get("status") or
-        (task.get("task") or {}).get("state") or
-        (task.get("task") or {}).get("status") or ""
+        nested.get("state") or nested.get("status") or ""
     ).lower()
-    progress = _seedr_progress(task.get("progress"))
+    progress = _seedr_progress_value(
+        task.get("progress") if task.get("progress") is not None else nested.get("progress")
+    )
     return state in {"finished", "completed", "complete"} or (progress is not None and progress >= 100)
 
 
@@ -1171,7 +1175,14 @@ async def seedr_prepare(body: dict[str, Any]):
         "folder_id": int(SEEDR_LIBRARY_FOLDER_ID),
     })
     task = _seedr_data(data)
-    task_id = str((task or {}).get("id") or (task or {}).get("task_id") or "")
+    if not isinstance(task, dict):
+        task = {}
+    task_id = str(
+        task.get("user_torrent_id")
+        or task.get("id")
+        or task.get("task_id")
+        or ""
+    )
     if not task_id:
         raise HTTPException(502, "Seedr did not return a task id")
     files = []
@@ -1181,7 +1192,7 @@ async def seedr_prepare(body: dict[str, Any]):
         pass
     return {
         "taskId": int(task_id) if task_id.isdigit() else task_id,
-        "name": str((task or {}).get("name") or (task or {}).get("title") or (task or {}).get("torrent_name") or ""),
+        "name": str(task.get("title") or task.get("name") or task.get("torrent_name") or ""),
         "files": [{"id": f["id"], "name": f["name"], "size": f["size"]} for f in files],
         "created": True,
         "paused": False,
@@ -1196,7 +1207,7 @@ async def seedr_task(task_id: str):
         if exc.status_code == 404:
             return {"taskId": task_id, "name": "", "status": "waiting", "progress": 0, "task": None, "files": [], "downloadUrl": None}
         raise
-    task = raw_task if isinstance(raw_task, dict) else {}
+    task = raw_task.get("task") if isinstance(raw_task, dict) and isinstance(raw_task.get("task"), dict) else (raw_task if isinstance(raw_task, dict) else {})
     progress, task = await _seedr_progress(task_id, task)
     if not _seedr_task_complete(task) and progress < 100:
         return {"taskId": task_id, "name": str(task.get("name") or task.get("title") or task.get("torrent_name") or ""), "status": "downloading", "progress": progress, "task": task, "files": [], "downloadUrl": None}
