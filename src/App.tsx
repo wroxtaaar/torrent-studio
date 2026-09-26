@@ -490,6 +490,22 @@ export default function App() {
     }
   };
 
+  const handleDeleteSeedrFile = async (file: { id: string; name: string; size: number; folderId: string; folderPath: string }) => {
+    const confirmed = window.confirm(
+      `Delete "${file.name}" from Seedr? This permanently removes the file from your Seedr account.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await api.deleteSeedrFile(file.id);
+      setSeedrFiles(prev => prev.filter(item => item.id !== file.id));
+      setSeedrError(null);
+    } catch (error) {
+      console.error('Failed to delete Seedr file:', error);
+      setSeedrError(error instanceof Error ? error.message : 'Failed to delete Seedr file');
+    }
+  };
+
   const handleDeleteFile = (id: string) => {
     const file = files.find(f => f.id === id);
     if (!file) return;
@@ -985,13 +1001,24 @@ export default function App() {
                           {formatBytes(file.size)} • {file.folderPath === '/' ? 'Root' : file.folderPath}
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleDownloadSeedrFile(file.id)}
-                        className="shrink-0 px-2.5 py-1.5 rounded-lg bg-emerald-400 text-slate-950 font-bold text-xs hover:bg-emerald-300 transition"
-                      >
-                        Download
-                      </button>
+                      <div className="shrink-0 flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadSeedrFile(file.id)}
+                          className="px-2.5 py-1.5 rounded-lg bg-emerald-400 text-slate-950 font-bold text-xs hover:bg-emerald-300 transition"
+                        >
+                          Download
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteSeedrFile(file)}
+                          className="p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200 transition"
+                          title="Delete from Seedr"
+                          aria-label={`Delete ${file.name} from Seedr`}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
