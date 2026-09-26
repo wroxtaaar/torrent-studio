@@ -1559,7 +1559,11 @@ async def _seedr_task(task_id: str) -> Any:
 
 
 async def _seedr_task_from_list(task_id: str) -> dict[str, Any]:
-    """Find the task in Seedr's transfer list when the detail endpoint omits metadata."""
+    """Find a task anywhere in Seedr's transfer-list response.
+
+    Seedr's V2 response shape has changed between deployments, so do not
+    assume the collection is always under a particular top-level key.
+    """
     target = str(task_id or "").strip()
     if not target:
         return {}
@@ -1569,21 +1573,35 @@ async def _seedr_task_from_list(task_id: str) -> dict[str, Any]:
     except HTTPException:
         return {}
 
-    for raw in _seedr_array(payload, ("tasks", "torrents")):
-        item = _seedr_data(raw)
-        if not isinstance(item, dict):
-            continue
-        candidate = str(
-            item.get("user_torrent_id")
-            or item.get("id")
-            or item.get("task_id")
-            or item.get("torrent_id")
-            or ""
-        ).strip()
-        if candidate == target:
-            return item
+    id_keys = ("user_torrent_id", "torrent_id", "task_id", "id")
+    seen: set[int] = set()
 
-    return {}
+    def walk(value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            object_id = id(value)
+            if object_id in seen:
+                return {}
+            seen.add(object_id)
+
+            for key in id_keys:
+                candidate = str(value.get(key) or "").strip()
+                if candidate == target:
+                    return value
+
+            for child in value.values():
+                found = walk(child)
+                if found:
+                    return found
+
+        elif isinstance(value, list):
+            for child in value:
+                found = walk(child)
+                if found:
+                    return found
+
+        return {}
+
+    return walk(_seedr_data(payload))
 
 
 async def _seedr_task_contents(task_id: str) -> list[dict[str, Any]]:
