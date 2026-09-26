@@ -53,3 +53,5 @@ jobs:
             echo "Deployment failed: health check did not become ready."
             docker compose logs --tail=100 app
             exit 1
+
+            # Auto-deploy test commit
