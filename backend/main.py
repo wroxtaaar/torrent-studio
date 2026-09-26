@@ -452,12 +452,15 @@ async def torrents_add(body: dict[str, Any]):
                 "selectionError": selection_error,
             }
 
-        seedr_result = _seedr_data(await seedr_request("/tasks", "POST", {
-            "torrent_magnet": urls,
-            "folder_id": int(SEEDR_LIBRARY_FOLDER_ID),
-        }, form=True))
-        if not isinstance(seedr_result, dict) or not seedr_result.get("success"):
-            raise HTTPException(502, "Seedr did not accept the torrent task")
+        info_hash = _seedr_info_hash(urls)
+        seedr_result = await _seedr_find_task_by_hash(info_hash) if info_hash else None
+        if not seedr_result:
+            seedr_result = _seedr_data(await seedr_request("/tasks", "POST", {
+                "torrent_magnet": urls,
+                "folder_id": int(SEEDR_LIBRARY_FOLDER_ID),
+            }, form=True))
+        if not isinstance(seedr_result, dict):
+            raise HTTPException(502, "Seedr did not return a valid task response")
 
         task_id = str(
             seedr_result.get("user_torrent_id")
@@ -1134,6 +1137,38 @@ def _seedr_progress_value(value: Any, depth: int = 0) -> float | None:
     return None
 
 
+def _seedr_info_hash(magnet: str) -> str:
+    match = re.search(r"urn:btih:([a-fA-F0-9]{40})", str(magnet or ""))
+    return match.group(1).lower() if match else ""
+
+
+async def _seedr_find_task_by_hash(info_hash: str) -> dict[str, Any] | None:
+    target = str(info_hash or "").strip().lower()
+    if not target:
+        return None
+    try:
+        payload = await seedr_request("/tasks")
+        for raw in _seedr_array(payload, ("tasks", "torrents")):
+            task = _seedr_data(raw)
+            if not isinstance(task, dict):
+                continue
+            nested = task.get("task") if isinstance(task.get("task"), dict) else {}
+            candidate = str(
+                task.get("torrent_hash")
+                or task.get("hash")
+                or task.get("info_hash")
+                or nested.get("torrent_hash")
+                or nested.get("hash")
+                or nested.get("info_hash")
+                or ""
+            ).lower()
+            if candidate == target:
+                return task
+    except Exception:
+        pass
+    return None
+
+
 def _seedr_task_complete(task: dict[str, Any]) -> bool:
     if not isinstance(task, dict):
         return False
@@ -1379,13 +1414,18 @@ async def seedr_prepare(body: dict[str, Any]):
         raise HTTPException(503, "Seedr is not configured")
     if not SEEDR_LIBRARY_FOLDER_ID.isdigit():
         raise HTTPException(503, "SEEDR_LIBRARY_FOLDER_ID must be configured for Torrent Studio Seedr downloads")
-    data = await seedr_request("/tasks", "POST", {
-        "torrent_magnet": magnet,
-        "folder_id": int(SEEDR_LIBRARY_FOLDER_ID),
-    }, form=True)
-    task = _seedr_data(data)
-    if not isinstance(task, dict):
-        task = {}
+    info_hash = _seedr_info_hash(magnet)
+    task = await _seedr_find_task_by_hash(info_hash) if info_hash else None
+    created = False
+
+    if not task:
+        task = _seedr_data(await seedr_request("/tasks", "POST", {
+            "torrent_magnet": magnet,
+            "folder_id": int(SEEDR_LIBRARY_FOLDER_ID),
+        }, form=True))
+        task = task if isinstance(task, dict) else {}
+        created = True
+
     task_id = str(
         task.get("user_torrent_id")
         or task.get("id")
@@ -1394,17 +1434,30 @@ async def seedr_prepare(body: dict[str, Any]):
     )
     if not task_id:
         raise HTTPException(502, "Seedr did not return a task id")
-    files = []
-    try:
-        files = await _seedr_task_contents(task_id)
-    except HTTPException:
-        pass
+
+    if created:
+        try:
+            await seedr_request(f"/tasks/{quote(task_id)}/pause", "POST")
+        except HTTPException as exc:
+            # Free accounts may not expose pause; the task itself is still valid.
+            print(f"[SEEDR] Could not pause prepared task {task_id}: {exc.detail}")
+
+    files: list[dict[str, Any]] = []
+    for _attempt in range(10):
+        try:
+            files = await _seedr_task_contents(task_id)
+        except HTTPException:
+            files = []
+        if files:
+            break
+        await asyncio.sleep(0.5)
+
     return {
         "taskId": int(task_id) if task_id.isdigit() else task_id,
         "name": str(task.get("title") or task.get("name") or task.get("torrent_name") or ""),
         "files": [{"id": f["id"], "name": f["name"], "size": f["size"]} for f in files],
-        "created": True,
-        "paused": False,
+        "created": created,
+        "paused": created,
     }
 
 
