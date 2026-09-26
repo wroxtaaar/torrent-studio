@@ -300,7 +300,7 @@ export const api = {
 
   async getSeedrTask(taskId: number | string): Promise<{
     taskId: number | string;
-    status: 'waiting' | 'downloading' | 'completed';
+    status: 'waiting' | 'downloading' | 'completed' | 'not_found';
     progress: number;
     downloadUrl: string | null;
     files: Array<{ id: string; name: string; size: number; url: string | null }>;
