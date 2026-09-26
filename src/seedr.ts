@@ -83,6 +83,27 @@ export async function listSeedrTasks(): Promise<any[]> {
   return asArray(data, ['tasks', 'torrents']);
 }
 
+export async function findSeedrTaskByHash(infoHash: string): Promise<any | null> {
+  const target = String(infoHash || '').trim().toLowerCase();
+  if (!target) return null;
+
+  const tasks = await listSeedrTasks();
+  for (const raw of tasks) {
+    const task = normalizeTaskPayload(raw);
+    const hash = String(
+      task?.torrent_payload?.hash ??
+      task?.torrent_hash ??
+      task?.hash ??
+      task?.info_hash ??
+      ''
+    ).toLowerCase();
+
+    if (hash && hash === target) return task;
+  }
+
+  return null;
+}
+
 async function getFolderContents(folderId: string | number): Promise<any> {
   if (String(folderId) === '0') {
     const rootPaths = [
