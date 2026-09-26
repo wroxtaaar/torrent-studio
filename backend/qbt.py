@@ -148,6 +148,18 @@ class QBitClient:
         data = {"urls": urls, **{k: str(v) for k, v in fields.items() if v is not None}}
         return await self.json("POST", "/api/v2/torrents/add", data=data)
 
+    async def set_file_priorities(self, torrent_hash: str, manifest: list[dict[str, Any]] | None = None, selected_ids: list[int] | None = None) -> Any:
+        if manifest:
+            selected = [i for i, item in enumerate(manifest) if int(item.get("priority", 1)) > 0]
+        else:
+            selected = selected_ids or []
+        all_ids = [str(i) for i in range(len(manifest or []))]
+        if all_ids:
+            await self.file_priority(torrent_hash, "|".join(all_ids), 0)
+        if selected:
+            return await self.file_priority(torrent_hash, "|".join(str(i) for i in selected), 1)
+        return None
+
     async def pause(self, hashes: str) -> Any:
         return await self.json("POST", "/api/v2/torrents/pause", data={"hashes": hashes})
 
@@ -173,15 +185,17 @@ class QBitClient:
         return response.content
 
     async def inspect_magnet(self, magnet: str, category: str = "Downloads") -> dict[str, Any]:
-        await self.add(
-            magnet,
-            savepath="/downloads",
-            autoTMM="false",
-            stopCondition="MetadataReceived",
-            category=category,
-        )
         info_hash = self.extract_info_hash(magnet)
-        for _ in range(30):
+        existing = await self.json("GET", f"/api/v2/torrents/info?{urlencode({'hash': info_hash})}") or []
+        if not existing:
+            await self.add(
+                magnet,
+                savepath="/downloads",
+                autoTMM="false",
+                stopCondition="MetadataReceived",
+                category=category,
+            )
+        for _ in range(60):
             await asyncio.sleep(1)
             torrents = await self.json("GET", f"/api/v2/torrents/info?{urlencode({'hash': info_hash})}") or []
             if torrents:
