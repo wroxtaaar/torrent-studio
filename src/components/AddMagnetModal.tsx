@@ -426,7 +426,8 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
               [{ name: file.name, size: file.size, priority: 1 }],
               undefined,
               'seedr',
-              [file.name]
+              [file.name],
+              prepared.taskId
             );
             setSeedrPreparedTaskId(null);
             onClose();
@@ -456,7 +457,8 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
           manifest,
           undefined,
           'seedr',
-          selected.map(file => file.name)
+          selected.map(file => file.name),
+          seedrPreparedTaskId
         );
 
         setSeedrPreparedTaskId(null);
