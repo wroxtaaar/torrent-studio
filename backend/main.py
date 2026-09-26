@@ -2090,13 +2090,20 @@ async def seedr_task_delete(task_id: str):
     if not task_id:
         raise HTTPException(400, "Seedr task id is required")
 
-    # Seedr v0.1 supports deleting an active task directly. This is the
-    # operation used by the Cancel button in the frontend.
+    # Seedr's task API may expose cancellation as an action endpoint rather
+    # than allowing DELETE on the task resource. Try the REST-style DELETE
+    # first, then the action form when Seedr responds with 405.
     try:
         return await seedr_request(f"/tasks/{quote(task_id)}", "DELETE")
     except HTTPException as exc:
-        # If the task has already disappeared, cancellation has effectively
-        # succeeded. Keep the UI idempotent.
+        if exc.status_code == 404:
+            return {"success": True, "alreadyGone": True, "taskId": task_id}
+        if exc.status_code != 405:
+            raise
+
+    try:
+        return await seedr_request(f"/tasks/{quote(task_id)}/delete", "POST")
+    except HTTPException as exc:
         if exc.status_code == 404:
             return {"success": True, "alreadyGone": True, "taskId": task_id}
         raise
