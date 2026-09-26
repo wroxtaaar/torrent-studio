@@ -37,7 +37,9 @@ interface AddMagnetModalProps {
     existingHash?: string,
     forceBackend?: 'seedr' | 'qbittorrent',
     selectedNames?: string[],
-     seedrTaskId?: number | string  ) => Promise<void>;
+     seedrTaskId?: number | string,
+    torrentName?: string
+  ) => Promise<void>;
   defaultFolder?: string;
   initialMagnet?: string;
 }
@@ -71,6 +73,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
   const [customFileCount, setCustomFileCount] = useState<number>(16);
   const [pasteManifestText, setPasteManifestText] = useState('');
   const [inspectedHash, setInspectedHash] = useState('');
+  const [inspectedTorrentName, setInspectedTorrentName] = useState('');
   const [backgroundMode, setBackgroundMode] = useState(false);
 
   const inspectTimeoutRef = useRef<any>(null);
@@ -123,7 +126,8 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     source: string,
     files: { index: number; name: string; size: number; path?: string; type?: string; priority?: number }[],
     hash?: string,
-    seedrTaskId?: number | string | null
+    seedrTaskId?: number | string | null,
+    torrentName?: string
   ) => {
     if (files.length !== 1) return;
 
@@ -169,7 +173,8 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
         hash || undefined,
         selectedBackend,
         undefined,
-        seedrTaskId ?? undefined
+        seedrTaskId ?? undefined,
+        torrentName || inspectedTorrentName || file.name
       );
       setBackgroundMode(false);
       onClose();
@@ -219,9 +224,10 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
            setMagnetInput(resolvedSource);
          }
         applyFileList(data.files);
+        setInspectedTorrentName(String(data.name || '').trim());
 
         if (data.files.length === 1) {
-           await startSingleFileDownload(resolvedSource, data.files, hash);
+           await startSingleFileDownload(resolvedSource, data.files, hash, null, String(data.name || '').trim());
           return;
         }
 
@@ -255,10 +261,11 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
               priority: f.priority
             }));
             setInspectedHash(hash);
+            setInspectedTorrentName(String((files as any).torrentName || (files as any).name || '').trim());
             applyFileList(normalizedFiles);
 
             if (normalizedFiles.length === 1) {
-              await startSingleFileDownload(source, normalizedFiles, hash);
+              await startSingleFileDownload(source, normalizedFiles, hash, null, inspectedTorrentName);
               return;
             }
 
@@ -306,6 +313,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     setError('');
     setInspectedFiles([]);
     setInspectedHash('');
+    setInspectedTorrentName('');
     setInspectionSource('');
     if (inspectTimeoutRef.current) clearTimeout(inspectTimeoutRef.current);
   };
@@ -489,7 +497,8 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
         inspectedHash || undefined,
         selectedBackend,
         undefined,
-        undefined
+        undefined,
+        inspectedTorrentName
       );
       setBackgroundMode(false);
       onClose();
