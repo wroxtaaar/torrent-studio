@@ -192,7 +192,7 @@ class QBitClient:
         if info_hash:
             existing = await self.json(
                 "GET",
-                f"/api/v2/torrents/info?{urlencode({'hash': info_hash})}"
+                f"/api/v2/torrents/info?{urlencode({'hashes': info_hash})}"
             ) or []
         else:
             # Search/indexer results can expose a .torrent/download URL instead
