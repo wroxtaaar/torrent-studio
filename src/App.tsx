@@ -482,6 +482,8 @@ export default function App() {
             const state = response?.state ?? response?.task?.state ?? response?.status ?? response?.task?.status;
             return state ? `Seedr replied: ${String(state)}` : 'Seedr replied: task accepted';
           })(),
+          selectionApplied: (result as any).selectionApplied,
+          selectionError: (result as any).selectionError,
         });
       } else {
         setSeedrNotice(null);
@@ -1206,6 +1208,17 @@ export default function App() {
                   </div>
                   <span className="shrink-0 font-mono text-[11px]">Task {seedrNotice.taskId ?? 'created'}</span>
                 </div>
+                 {seedrNotice.selectionApplied === true && (
+                   <div className="mt-2 text-[11px] text-emerald-300">
+                     ✓ Seedr accepted your file selection.
+                   </div>
+                 )}
+                 {seedrNotice.selectionApplied === false && (
+                   <div className="mt-2 text-[11px] text-amber-300">
+                     ⚠ Seedr did not accept file selection — the full torrent will download.
+                     {seedrNotice.selectionError ? ` ${seedrNotice.selectionError}` : ''}
+                   </div>
+                 )}
 
                 {seedrNotice.status === 'completed' && seedrNotice.files.length > 0 && (
                   <div className="space-y-1.5 pt-2 border-t border-emerald-500/15">
