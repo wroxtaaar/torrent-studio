@@ -259,10 +259,12 @@ export async function getSeedrQuota(): Promise<SeedrQuota> {
   };
 }
 
+const SEEDR_LIBRARY_FOLDER_ID = String(process.env.SEEDR_LIBRARY_FOLDER_ID || '').trim();
+
 export async function addSeedrTask(magnet: string): Promise<any> {
   return seedrRequest('/tasks', 'POST', {
     torrent_magnet: magnet,
-    folder_id: 0,
+    folder_id: SEEDR_LIBRARY_FOLDER_ID ? Number(SEEDR_LIBRARY_FOLDER_ID) : 0,
   });
 }
 
@@ -563,49 +565,15 @@ async function mapWithConcurrency<T, R>(
 }
 
 export async function listSeedrLibrary(): Promise<SeedrLibraryFile[]> {
-  // The free-tier account exposes the complete library through /search/fs,
-  // while /fs/root and /fs/root/contents return 404. Use the search index as
-  // the authoritative library listing instead of probing unavailable roots.
-  const result = unwrapData(await seedrRequest('/search/fs?query='));
-  const rawFiles = Array.isArray(result?.files) ? result.files : [];
-
-  if (!rawFiles.length) return [];
-
-  const counts = new Map<string, number>();
-  for (const file of rawFiles) {
-    const folderId = numericId(file?.folder_id ?? file?.folderId);
-    if (folderId) counts.set(folderId, (counts.get(folderId) || 0) + 1);
+  // Torrent Studio must not expose unrelated files from the user's entire
+  // Seedr account. The free-tier /search/fs endpoint is a flat account-wide
+  // index, so use the configured Torrent Studio folder as the library root.
+  if (!SEEDR_LIBRARY_FOLDER_ID) {
+    console.warn('[SEEDR] SEEDR_LIBRARY_FOLDER_ID is not configured; library listing is disabled to avoid exposing unrelated account files.');
+    return [];
   }
 
-  // Only resolve paths for multi-file folders. Single-file entries are shown
-  // directly by the UI, so spending an API request to resolve their folder
-  // path is unnecessary. Limit concurrency because free accounts have lower
-  // API rate limits.
-  const multiFileFolderIds = [...counts.entries()]
-    .filter(([, count]) => count > 1)
-    .map(([folderId]) => folderId);
-
-  const folderPaths = new Map<string, string>();
-  const resolvedPaths = await mapWithConcurrency(
-    multiFileFolderIds,
-    4,
-    async folderId => [folderId, await getSeedrFolderPath(folderId)] as const
-  );
-
-  for (const [folderId, path] of resolvedPaths) {
-    folderPaths.set(folderId, path);
-  }
-
-  return rawFiles.map(file => {
-    const folderId = numericId(file?.folder_id ?? file?.folderId);
-    return {
-      id: numericId(file?.id ?? file?.file_id ?? file?.folder_file_id),
-      name: String(file?.name ?? file?.filename ?? ''),
-      size: Number(file?.size ?? file?.length ?? 0),
-      folderId,
-      folderPath: folderPaths.get(folderId) ?? '/',
-    };
-  }).filter(file => Boolean(file.id && file.name));
+  return collectSeedrFiles(SEEDR_LIBRARY_FOLDER_ID, '/Torrent Studio');
 }
 
 export async function getSeedrFileDownload(fileId: string | number): Promise<{ url: string; name: string }> {
