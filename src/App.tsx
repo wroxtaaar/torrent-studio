@@ -1559,81 +1559,164 @@ export default function App() {
                 <div className="mt-3">
                   {selectedSeedrFolderId === null ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {seedrFolderGroups.map(folder => (
-                        <div
-                          key={folder.folderId}
-                          className="h-full rounded-xl bg-slate-900/80 border border-slate-800 px-3 py-3 hover:border-cyan-500/30 transition"
-                        >
-                          <div className="flex items-center gap-2.5">
-                            <button
-                              type="button"
-                              onClick={() => folder.folderId !== '__root__' && folder.folderId !== '__active_seedr__' && setSelectedSeedrFolderId(folder.folderId)}
-                              className="min-w-0 flex-1 text-left flex items-center gap-3"
-                              disabled={folder.folderId === '__root__'}
+                      {seedrFolderGroups.map(folder => {
+                        const singleFile = folder.files.length === 1;
+                        const file = singleFile ? folder.files[0] : null;
+                        const isMedia = Boolean(file && /\.(mkv|mp4|m4v|webm|mov|avi|m3u8|ts|mp3|wav|flac|aac|ogg|m4a)$/i.test(file.name));
+
+                        // One-file folders are displayed directly as the file.
+                        // Multi-file folders remain collapsible folders.
+                        if (singleFile && file) {
+                          return (
+                            <div
+                              key={folder.folderId}
+                              className="h-full rounded-xl bg-slate-900/80 border border-slate-800 px-3 py-3 hover:border-cyan-500/30 transition"
                             >
-                              <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400 shrink-0">
-                                <Folder className="w-5 h-5" />
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="truncate text-sm font-semibold text-slate-100">{folder.name}</div>
-                                <div className="text-[10px] text-slate-500 mt-0.5">
-                                  {folder.files.length} file{folder.files.length === 1 ? '' : 's'} • {formatBytes(folder.totalSize)}
-                                  {folder.active && <span className="text-emerald-300"> • Downloading</span>}
+                              <div className="flex items-center gap-3">
+                                <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400 shrink-0">
+                                  <File className="w-5 h-5" />
                                 </div>
-                                {folder.active && (
-                                  <div className="mt-1.5 flex items-center gap-2">
-                                    <div className="h-1.5 flex-1 rounded-full bg-slate-800 overflow-hidden">
-                                      <div
-                                        className="h-full rounded-full bg-emerald-400 transition-all duration-500"
-                                        style={{ width: `${folder.progress ?? 0}%` }}
-                                      />
+
+                                <div className="min-w-0 flex-1">
+                                  <div className="truncate text-sm font-semibold text-slate-100">{file.name}</div>
+                                  <div className="text-[10px] text-slate-500 mt-0.5">
+                                    {formatBytes(file.size)}
+                                    {folder.active && <span className="text-emerald-300"> • Downloading</span>}
+                                  </div>
+
+                                  {folder.active && (
+                                    <div className="mt-1.5 flex items-center gap-2">
+                                      <div className="h-1.5 flex-1 rounded-full bg-slate-800 overflow-hidden">
+                                        <div
+                                          className="h-full rounded-full bg-emerald-400 transition-all duration-500"
+                                          style={{ width: (folder.progress ?? 0) + '%' }}
+                                        />
+                                      </div>
+                                      <span className="shrink-0 text-[10px] font-mono font-semibold text-emerald-300">
+                                        {Number(folder.progress ?? 0).toFixed(2).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '')}%
+                                      </span>
                                     </div>
-                                    <span className="shrink-0 text-[10px] font-mono font-semibold text-emerald-300">
-                                      {Number(folder.progress ?? 0).toFixed(2).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '')}%
-                                    </span>
+                                  )}
+                                </div>
+
+                                {folder.active ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleCancelSeedrDownload()}
+                                    disabled={isCancellingSeedr || seedrNotice?.taskId == null}
+                                    className="shrink-0 px-2.5 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/25 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200 disabled:opacity-40 disabled:cursor-not-allowed text-[10px] font-bold transition"
+                                    title="Cancel Seedr download"
+                                  >
+                                    {isCancellingSeedr ? 'Cancelling…' : 'Cancel'}
+                                  </button>
+                                ) : (
+                                  <div className="shrink-0 flex items-center gap-1.5">
+                                    {isMedia && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleStreamSeedrFile(file)}
+                                        className="px-2.5 py-1.5 rounded-lg bg-cyan-500 text-slate-950 font-bold text-xs hover:bg-cyan-400 transition"
+                                      >
+                                        Stream
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDownloadSeedrFile(file.id)}
+                                      className="px-2.5 py-1.5 rounded-lg bg-emerald-400 text-slate-950 font-bold text-xs hover:bg-emerald-300 transition"
+                                    >
+                                      Download
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteSeedrFile(file)}
+                                      className="p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200 transition"
+                                      title="Delete this file"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
                                   </div>
                                 )}
                               </div>
-                              {folder.folderId !== '__root__' && folder.folderId !== '__active_seedr__' && <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />}
-                            </button>
+                            </div>
+                          );
+                        }
 
-                            {folder.active && (
-                              <div className="shrink-0">
-                                <button
-                                  type="button"
-                                  onClick={() => void handleCancelSeedrDownload()}
-                                  disabled={isCancellingSeedr || seedrNotice?.taskId == null}
-                                  className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/25 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200 disabled:opacity-40 disabled:cursor-not-allowed text-[10px] font-bold transition"
-                                  title="Cancel Seedr download"
-                                >
-                                  {isCancellingSeedr ? 'Cancelling…' : 'Cancel'}
-                                </button>
-                              </div>
-                            )}
+                        return (
+                          <div
+                            key={folder.folderId}
+                            className="h-full rounded-xl bg-slate-900/80 border border-slate-800 px-3 py-3 hover:border-cyan-500/30 transition"
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <button
+                                type="button"
+                                onClick={() => folder.folderId !== '__root__' && folder.folderId !== '__active_seedr__' && setSelectedSeedrFolderId(folder.folderId)}
+                                className="min-w-0 flex-1 text-left flex items-center gap-3"
+                                disabled={folder.folderId === '__root__'}
+                              >
+                                <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400 shrink-0">
+                                  <Folder className="w-5 h-5" />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="truncate text-sm font-semibold text-slate-100">{folder.name}</div>
+                                  <div className="text-[10px] text-slate-500 mt-0.5">
+                                    {folder.files.length} files • {formatBytes(folder.totalSize)}
+                                    {folder.active && <span className="text-emerald-300"> • Downloading</span>}
+                                  </div>
+                                  {folder.active && (
+                                    <div className="mt-1.5 flex items-center gap-2">
+                                      <div className="h-1.5 flex-1 rounded-full bg-slate-800 overflow-hidden">
+                                        <div
+                                          className="h-full rounded-full bg-emerald-400 transition-all duration-500"
+                                          style={{ width: (folder.progress ?? 0) + '%' }}
+                                        />
+                                      </div>
+                                      <span className="shrink-0 text-[10px] font-mono font-semibold text-emerald-300">
+                                        {Number(folder.progress ?? 0).toFixed(2).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '')}%
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                                <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />
+                              </button>
 
-                            {folder.folderId !== '__root__' && !folder.active && (
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                <button
-                                  type="button"
-                                  onClick={() => handleDownloadSeedrFolder(folder.folderId)}
-                                  className="px-2.5 py-1.5 rounded-lg bg-emerald-400 text-slate-950 font-bold text-xs hover:bg-emerald-300 transition"
-                                >
-                                  Download ZIP
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteSeedrFolder(folder.folderId)}
-                                  className="p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200 transition"
-                                  title="Delete Seedr folder"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </div>
-                            )}
+                              {folder.active && (
+                                <div className="shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleCancelSeedrDownload()}
+                                    disabled={isCancellingSeedr || seedrNotice?.taskId == null}
+                                    className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/25 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200 disabled:opacity-40 disabled:cursor-not-allowed text-[10px] font-bold transition"
+                                    title="Cancel Seedr download"
+                                  >
+                                    {isCancellingSeedr ? 'Cancelling…' : 'Cancel'}
+                                  </button>
+                                </div>
+                              )}
+
+                              {!folder.active && folder.folderId !== '__root__' && (
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDownloadSeedrFolder(folder.folderId)}
+                                    className="px-2.5 py-1.5 rounded-lg bg-emerald-400 text-slate-950 font-bold text-xs hover:bg-emerald-300 transition"
+                                  >
+                                    Download ZIP
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteSeedrFolder(folder.folderId)}
+                                    className="p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200 transition"
+                                    title="Delete Seedr folder"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
+                        );
+                      })}                    </div>
                   ) : (
                     (() => {
                       const folder = seedrFolderGroups.find(item => item.folderId === selectedSeedrFolderId);
