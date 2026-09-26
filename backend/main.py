@@ -406,6 +406,49 @@ async def torrents_add(body: dict[str, Any]):
     existing_hash = str(body.get("existingHash") or "").strip()
     manifest = body.get("manifest") or []
     selected_ids = [int(x) for x in (body.get("selectedFiles") or [])]
+    force_backend = str(body.get("forceBackend") or "").strip().lower()
+    seedr_task_id = str(body.get("seedrTaskId") or "").strip()
+
+    # Seedr is an explicit backend choice from the frontend. Do not fall
+    # through to qBittorrent when forceBackend=seedr.
+    if force_backend == "seedr":
+        if not SEEDR_TOKEN:
+            raise HTTPException(503, "Seedr is not configured")
+        if not SEEDR_LIBRARY_FOLDER_ID.isdigit():
+            raise HTTPException(503, "SEEDR_LIBRARY_FOLDER_ID must be configured for Seedr downloads")
+
+        if seedr_task_id:
+            return {
+                "backend": "seedr",
+                "seedrTaskId": int(seedr_task_id) if seedr_task_id.isdigit() else seedr_task_id,
+                "seedrResponse": {"user_torrent_id": seedr_task_id, "success": True, "reused": True},
+                "existingHash": existing_hash or None,
+                "selectionApplied": False,
+            }
+
+        seedr_result = _seedr_data(await seedr_request("/tasks", "POST", {
+            "torrent_magnet": urls,
+            "folder_id": int(SEEDR_LIBRARY_FOLDER_ID),
+        }))
+        if not isinstance(seedr_result, dict) or not seedr_result.get("success"):
+            raise HTTPException(502, "Seedr did not accept the torrent task")
+
+        task_id = str(
+            seedr_result.get("user_torrent_id")
+            or seedr_result.get("id")
+            or seedr_result.get("task_id")
+            or ""
+        )
+        if not task_id:
+            raise HTTPException(502, "Seedr did not return a task id")
+
+        return {
+            "backend": "seedr",
+            "seedrTaskId": int(task_id) if task_id.isdigit() else task_id,
+            "seedrResponse": seedr_result,
+            "existingHash": existing_hash or None,
+            "selectionApplied": False,
+        }
 
     # Magnet inspection creates a stopped metadata-only torrent. Reuse that
     # exact hash instead of adding the magnet again (which qBittorrent rejects
