@@ -192,18 +192,6 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
           ? `magnet:?xt=urn:btih:${hash.toLowerCase()}`
           : source;
 
-      // BEP 53 lets a magnet carry the exact file indices to download.
-      // This gives Seedr a chance to apply selection before storage is
-      // allocated, instead of adding the full torrent and filtering later.
-      if (selectedBackend === 'seedr') {
-        const index = Number(file.index);
-        if (Number.isInteger(index) && index >= 0) {
-          const separator = seedrSource.includes('?') ? '&' : '?';
-          if (!/[?&]so=/.test(seedrSource)) {
-            seedrSource += separator + 'so=' + encodeURIComponent(String(index));
-          }
-        }
-      }
 
       await onAdd(
         seedrSource,
@@ -526,7 +514,8 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
         if (
           quota.configured &&
           totalSelectedSize > 0 &&
-          totalSelectedSize < quota.remainingSpace
+          totalSelectedSize < quota.remainingSpace &&
+          totalSelectedSize >= totalTorrentSize
         ) {
           selectedBackend = 'seedr';
         }
@@ -541,11 +530,6 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
           ? `magnet:?xt=urn:btih:${inspectedHash.toLowerCase()}`
           : magnetInput.trim();
 
-      if (selectedBackend === 'seedr' && selectedFileIndexes.length > 0) {
-        const separator = downloadSource.includes('?') ? '&' : '?';
-        const so = selectedFileIndexes.join(',');
-        downloadSource += separator + 'so=' + encodeURIComponent(so);
-      }
 
       await onAdd(
         downloadSource,
