@@ -263,6 +263,57 @@ export async function getSeedrTaskStatus(taskId: string | number, selectedNames:
   };
 }
 
+
+export type SeedrLibraryFile = {
+  id: string;
+  name: string;
+  size: number;
+  folderId: string;
+  folderPath: string;
+};
+
+export async function listSeedrLibrary(): Promise<SeedrLibraryFile[]> {
+  const walk = async (folderId: string | number, folderPath: string, depth = 0): Promise<SeedrLibraryFile[]> => {
+    if (depth > 8) return [];
+
+    const payload = await listSeedrFolder(folderId);
+    const files = Array.isArray(payload?.files)
+      ? payload.files.map((file: any) => ({
+          id: numericId(file?.folder_file_id ?? file?.file_id ?? file?.id),
+          name: String(file?.name ?? file?.filename ?? ''),
+          size: Number(file?.size ?? 0),
+          folderId: numericId(folderId),
+          folderPath,
+        })).filter((file: SeedrLibraryFile) => Boolean(file.id && file.name))
+      : [];
+
+    const folders = Array.isArray(payload?.folders) ? payload.folders : [];
+    const nested = await Promise.all(
+      folders.map(async (folder: any) => {
+        const childId = folder?.id ?? folder?.folder_id ?? folder?.fid;
+        if (childId == null) return [];
+        const childName = String(folder?.name ?? folder?.title ?? 'Folder');
+        const childPath = folderPath === '/' ? '/' + childName : folderPath + '/' + childName;
+        return walk(childId, childPath, depth + 1);
+      })
+    );
+
+    return [...files, ...nested.flat()];
+  };
+
+  return walk('0', '/');
+}
+
+export async function getSeedrFileDownload(fileId: string | number): Promise<{ url: string; name: string }> {
+  const details = await fetchSeedrFile(fileId);
+  const url = extractUrl(details);
+  if (!url) throw new Error('Seedr did not return a download URL');
+  return {
+    url,
+    name: String(details?.name ?? details?.filename ?? ''),
+  };
+}
+
 export function seedrMaxSizeBytes(): number {
   return SEEDR_MAX_SIZE_BYTES;
 }
