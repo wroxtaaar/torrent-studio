@@ -1054,11 +1054,27 @@ async def seedr_request(path: str, method: str = "GET", body: Any = None, form: 
         data = text
     if response.status_code >= 400:
         if isinstance(data, dict):
-            message = data.get("error") or data.get("message") or text
+            message = (
+                data.get("error_description")
+                or data.get("reason_phrase")
+                or data.get("reason")
+                or data.get("message")
+                or data.get("error")
+                or text
+            )
             if isinstance(message, dict):
-                message = message.get("message") or str(message)
+                message = (
+                    message.get("message")
+                    or message.get("description")
+                    or message.get("error_description")
+                    or str(message)
+                )
         else:
             message = text
+        print(
+            f"[SEEDR] {method} {path} -> HTTP {response.status_code}: "
+            f"{str(message or 'Seedr API request failed')}"
+        )
         raise HTTPException(response.status_code, str(message or "Seedr API request failed"))
     return data
 
