@@ -516,7 +516,7 @@ export default function App() {
     };
 
     poll();
-    const interval = window.setInterval(poll, 5000);
+    const interval = window.setInterval(poll, 2000);
     return () => {
       active = false;
       window.clearInterval(interval);
