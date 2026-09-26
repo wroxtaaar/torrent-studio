@@ -158,7 +158,7 @@ export const api = {
     manifest?: { name: string; size: number; priority: number }[],
     existingHash?: string,
     forceBackend?: 'seedr' | 'qbittorrent'
-  ): Promise<{ backend?: 'seedr' | 'qbittorrent'; seedrTaskId?: number | null }> {
+  ): Promise<{ backend?: 'seedr' | 'qbittorrent'; seedrTaskId?: number | null; seedrResponse?: any }> {
     const res = await fetch('/api/v2/torrents/add', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
