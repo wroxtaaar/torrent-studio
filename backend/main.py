@@ -470,6 +470,7 @@ async def torrents_add(body: dict[str, Any]):
     selected_ids = [int(x) for x in (body.get("selectedFiles") or [])]
     force_backend = str(body.get("forceBackend") or "").strip().lower()
     seedr_task_id = str(body.get("seedrTaskId") or "").strip()
+    torrent_name = str(body.get("torrentName") or "").strip()
 
     # Seedr is an explicit backend choice from the frontend. Do not fall
     # through to qBittorrent when forceBackend=seedr.
@@ -541,6 +542,10 @@ async def torrents_add(body: dict[str, Any]):
                     selection_error = str(exc)
 
             seedr_folder_name = await _seedr_folder_name(seedr_task_id)
+            if re.fullmatch(r"[a-f0-9]{40}", seedr_folder_name, re.IGNORECASE) and torrent_name:
+                seedr_folder_name = torrent_name
+            if not seedr_folder_name:
+                seedr_folder_name = torrent_name
             return {
                 "backend": "seedr",
                 "seedrTaskId": int(seedr_task_id) if seedr_task_id.isdigit() else seedr_task_id,
@@ -602,6 +607,10 @@ async def torrents_add(body: dict[str, Any]):
                 selection_error = str(exc)
 
         seedr_folder_name = await _seedr_folder_name(task_id)
+        if re.fullmatch(r"[a-f0-9]{40}", seedr_folder_name, re.IGNORECASE) and torrent_name:
+            seedr_folder_name = torrent_name
+        if not seedr_folder_name:
+            seedr_folder_name = torrent_name
         return {
             "backend": "seedr",
             "seedrTaskId": int(task_id) if task_id.isdigit() else task_id,
@@ -2138,6 +2147,8 @@ async def seedr_task(task_id: str):
 
     folder_id = str(task.get("folder_created_id") or "").strip()
     folder_name = await _seedr_folder_name(folder_id) if folder_id else ""
+    if re.fullmatch(r"[a-f0-9]{40}", folder_name, re.IGNORECASE):
+        folder_name = name
     if not folder_name:
         folder_name = name
 
@@ -2240,6 +2251,8 @@ async def seedr_files():
                     or task.get("torrent_name")
                     or ""
                 ).strip()
+                if re.fullmatch(r"[a-f0-9]{40}", folder_name, re.IGNORECASE):
+                    folder_name = ""
                 display_name = folder_name or task_name or created
                 folder_targets.append(
                     (created, "/Torrent Studio/" + display_name)
