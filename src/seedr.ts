@@ -408,6 +408,33 @@ export async function getSeedrFileDownload(fileId: string | number): Promise<{ u
   return getDownloadUrl(fileId);
 }
 
+export async function getSeedrFilePresentation(
+  fileId: string | number,
+  presentationType: 'video' | 'audio'
+): Promise<{ url: string; name: string }> {
+  const result = await seedrRequest(
+    `/presentations/file/${encodeURIComponent(String(fileId))}/${presentationType}`
+  );
+  const data = unwrapData(result);
+  const url = String(
+    data?.url ??
+    data?.stream_url ??
+    data?.streamUrl ??
+    data?.video_url ??
+    data?.audio_url ??
+    data?.hls_url ??
+    data?.playback_url ??
+    (typeof result === 'string' ? result : '')
+  );
+
+  if (!url) throw new Error(`Seedr did not return a ${presentationType} playback URL`);
+
+  return {
+    url,
+    name: String(data?.name ?? data?.filename ?? ''),
+  };
+}
+
 export async function deleteSeedrFile(fileId: string | number): Promise<void> {
   await seedrRequest(`/fs/file/${encodeURIComponent(String(fileId))}`, 'DELETE');
 }
