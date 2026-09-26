@@ -316,6 +316,38 @@ export async function addSeedrTask(magnet: string): Promise<any> {
   });
 }
 
+export async function pauseSeedrTask(taskId: string | number): Promise<any> {
+  return seedrRequest(`/tasks/${encodeURIComponent(String(taskId))}/pause`, 'POST');
+}
+
+export async function resumeSeedrTask(taskId: string | number): Promise<any> {
+  return seedrRequest(`/tasks/${encodeURIComponent(String(taskId))}/resume`, 'POST');
+}
+
+export async function getSeedrTaskSelection(taskId: string | number): Promise<{
+  task: any;
+  files: Array<{ id: string; name: string; size: number }>;
+}> {
+  const taskIdValue = numericId(taskId);
+  const task = normalizeTaskPayload(await getTask(taskIdValue));
+  let rawFiles: any[] = [];
+  try {
+    rawFiles = await taskFiles(taskIdValue);
+  } catch {
+    rawFiles = [];
+  }
+
+  const files = rawFiles
+    .filter(file => file?.id != null)
+    .map(file => ({
+      id: String(file.id),
+      name: String(file.name ?? file.path ?? 'Unknown file'),
+      size: Number(file.size ?? file.length ?? 0),
+    }));
+
+  return { task, files };
+}
+
 export async function listSeedrTasks(): Promise<any[]> {
   const data = await seedrRequest('/tasks');
   return asArray(data, ['tasks', 'torrents']);
