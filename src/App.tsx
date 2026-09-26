@@ -100,6 +100,7 @@ export default function App() {
   const [seedrNotice, setSeedrNotice] = useState<{ taskId: number | string | null; name: string; status: 'waiting' | 'downloading' | 'completed'; progress: number; downloadUrl: string | null; files: Array<{ id: string; name: string; size: number; url: string | null }> } | null>(null);
   const [seedrFiles, setSeedrFiles] = useState<Array<{ id: string; name: string; size: number; folderId: string; folderPath: string }>>([]);
   const [seedrConfigured, setSeedrConfigured] = useState(false);
+  const [seedrQuota, setSeedrQuota] = useState<{ maxSpace: number; usedSpace: number; remainingSpace: number } | null>(null);
   const [seedrLoading, setSeedrLoading] = useState(false);
   const [seedrError, setSeedrError] = useState<string | null>(null);
   const [selectedSeedrFolderId, setSelectedSeedrFolderId] = useState<string | null>(null);
@@ -234,9 +235,17 @@ export default function App() {
     setSeedrLoading(true);
     setSeedrError(null);
     try {
-      const result = await api.getSeedrFiles();
+      const [result, quota] = await Promise.all([
+        api.getSeedrFiles(),
+        api.getSeedrQuota().catch(() => null)
+      ]);
       setSeedrConfigured(result.configured);
       setSeedrFiles(result.files);
+      setSeedrQuota(quota && quota.configured ? {
+        maxSpace: quota.maxSpace,
+        usedSpace: quota.usedSpace,
+        remainingSpace: quota.remainingSpace
+      } : null);
     } catch (error: any) {
       setSeedrError(error?.message || 'Failed to load Seedr files');
     } finally {
@@ -322,28 +331,45 @@ export default function App() {
     category: string,
     selectedFiles?: number[],
     manifest?: { name: string; size: number; priority: number }[],
-    existingHash?: string
+    existingHash?: string,
+    forceBackend?: 'qbittorrent'
   ) => {
-    const result = await api.addMagnet(magnet, category, selectedFiles, manifest, existingHash);
-    if (result.backend === 'seedr') {
-      setSeedrNotice({
-        taskId: result.seedrTaskId ?? null,
-        name: manifest?.[0]?.name || magnet,
-        status: 'waiting',
-        progress: 0,
-        downloadUrl: null,
-        files: [],
-      });
-    } else {
-      setSeedrNotice(null);
+    try {
+      const result = await api.addMagnet(magnet, category, selectedFiles, manifest, existingHash, forceBackend);
+      if (result.backend === 'seedr') {
+        setSeedrNotice({
+          taskId: result.seedrTaskId ?? null,
+          name: manifest?.[0]?.name || magnet,
+          status: 'waiting',
+          progress: 0,
+          downloadUrl: null,
+          files: [],
+        });
+      } else {
+        setSeedrNotice(null);
+      }
+      const updated = await api.getTorrents();
+      setTorrents(updated);
+      const stats = await api.getStorageStats();
+      setStorageStats(stats);
+      setActiveTab('transfers');
+    } catch (error: any) {
+      if (error?.code === 'SEEDR_INSUFFICIENT_SPACE') {
+        const required = Number(error.requiredBytes || 0);
+        const remaining = Number(error.remainingSpace || 0);
+        const message =
+          `Seedr does not have enough free space.\n\n` +
+          `Required: ${formatBytes(required)}\n` +
+          `Seedr remaining: ${formatBytes(remaining)}\n\n` +
+          `OK = use qBittorrent instead\nCancel = free some Seedr space and try again.`;
+        if (window.confirm(message)) {
+          await handleAddMagnet(magnet, category, selectedFiles, manifest, existingHash, 'qbittorrent');
+        }
+        return;
+      }
+      throw error;
     }
-    const updated = await api.getTorrents();
-    setTorrents(updated);
-    const stats = await api.getStorageStats();
-    setStorageStats(stats);
-    setActiveTab('transfers');
   };
-
 
   useEffect(() => {
     if (!seedrNotice?.taskId || seedrNotice.status === 'completed') return;
@@ -1069,6 +1095,19 @@ export default function App() {
                   <p className="text-xs text-slate-400 mt-0.5">
                     Files already downloaded to your Seedr account stay visible here, even after refreshing Torrent Studio.
                   </p>
+                  {seedrConfigured && seedrQuota && (
+                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+                      <span className="text-slate-400">
+                        Consumed: <strong className="text-slate-200">{formatBytes(seedrQuota.usedSpace)}</strong>
+                      </span>
+                      <span className="text-slate-400">
+                        Remaining: <strong className={seedrQuota.remainingSpace > 0 ? 'text-emerald-300' : 'text-rose-300'}>{formatBytes(seedrQuota.remainingSpace)}</strong>
+                      </span>
+                      <span className="text-slate-500">
+                        Total: {formatBytes(seedrQuota.maxSpace)}
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -1080,6 +1119,12 @@ export default function App() {
                   <span>{seedrLoading ? 'Refreshing...' : 'Refresh Seedr'}</span>
                 </button>
               </div>
+
+              {seedrConfigured && seedrQuota && seedrQuota.remainingSpace <= 0 && (
+                <div className="mt-3 rounded-xl bg-rose-500/10 border border-rose-500/20 px-3 py-2.5 text-xs text-rose-200">
+                  <strong>Seedr is full.</strong> New torrents that fit the Seedr size limit will be offered to qBittorrent instead, or you can free space in Seedr and try again.
+                </div>
+              )}
 
               {seedrError && (
                 <div className="mt-3 rounded-xl bg-rose-500/10 border border-rose-500/20 px-3 py-2 text-xs text-rose-300">
