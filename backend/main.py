@@ -1568,19 +1568,21 @@ async def _seedr_folder_name(folder_id: str) -> str:
     if not folder_id:
         return ""
 
-    try:
-        payload = _seedr_data(
-            await seedr_request(f"/fs/folder/{quote(folder_id)}/contents")
-        )
-    except HTTPException:
-        return ""
+    payloads: list[Any] = []
+    # Try the folder resource first; some Seedr V2 deployments put the folder
+    # metadata there, while others include it with the contents response.
+    for endpoint in (
+        f"/fs/folder/{quote(folder_id)}",
+        f"/fs/folder/{quote(folder_id)}/contents",
+    ):
+        try:
+            payloads.append(_seedr_data(await seedr_request(endpoint)))
+        except HTTPException:
+            continue
 
     def direct_name(value: Any) -> str:
         if not isinstance(value, dict):
             return ""
-        # Only inspect dictionaries that look like folder metadata. Never
-        # recurse into arbitrary file objects, otherwise the first filename
-        # could be mistaken for the folder name.
         object_id = str(
             value.get("id")
             or value.get("folder_id")
@@ -1593,7 +1595,10 @@ async def _seedr_folder_name(folder_id: str) -> str:
                 return Path(name.rstrip("/")).name
         return ""
 
-    if isinstance(payload, dict):
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+
         found = direct_name(payload)
         if found:
             return found
@@ -1604,14 +1609,6 @@ async def _seedr_folder_name(folder_id: str) -> str:
             if found:
                 return found
 
-            if isinstance(child, dict):
-                nested = child.get("folder") or child.get("directory")
-                found = direct_name(nested)
-                if found:
-                    return found
-
-        # Some responses put folder metadata inside data, but still keep the
-        # folder object identifiable by the requested ID.
         data = payload.get("data")
         if isinstance(data, dict):
             found = direct_name(data)
