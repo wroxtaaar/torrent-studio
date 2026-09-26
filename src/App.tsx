@@ -110,6 +110,7 @@ export default function App() {
   type SeedrNotice = {
     taskId: number | string | null;
     name: string;
+    folderName: string;
     status: 'waiting' | 'downloading' | 'completed' | 'not_found';
     progress: number;
     downloadUrl: string | null;
@@ -162,36 +163,14 @@ export default function App() {
     }
   });
 
-  // Merge files that Seedr has already exposed for the active task into the
-  // library view immediately. They may not be present in /api/seedr/files yet
-  // because the torrent is still downloading.
-  const seedrDisplayFiles = useMemo(() => {
-    const completed = seedrFiles.map(file => ({
-      ...file,
-      downloadProgress: undefined as number | undefined,
-      downloading: false,
-    }));
-
-    if (!seedrNotice?.taskId || seedrNotice.status === 'not_found' || !seedrNotice.files.length) {
-      return completed;
-    }
-
-    const live = seedrNotice.files.map(file => ({
-      id: file.id,
-      name: file.name,
-      size: file.size,
-      folderId: file.folderId || '__root__',
-      folderPath: file.folderPath || '/Torrent Studio',
-      downloadProgress: Math.max(0, Math.min(100, Number(seedrNotice.progress) || 0)),
-      downloading: seedrNotice.status !== 'completed' || !file.url,
-    }));
-
-    const liveIds = new Set(live.map(file => file.id));
-    return [
-      ...completed.filter(file => !liveIds.has(file.id)),
-      ...live,
-    ];
-  }, [seedrFiles, seedrNotice]);
+  // Active Seedr transfers are shown only in the transfer card above.
+  // Keep the persistent library limited to files that Seedr has actually
+  // completed, so the same download is not rendered in two places.
+  const seedrDisplayFiles = seedrFiles.map(file => ({
+    ...file,
+    downloadProgress: undefined as number | undefined,
+    downloading: false,
+  }));
 
   const seedrFolderGroups = useMemo(() => {
     const groups = new Map<string, {
@@ -563,6 +542,7 @@ export default function App() {
 
             return 'Waiting for Seedr metadata…';
           })(),
+          folderName: String((result as any).seedrFolderName ?? '').trim(),
           status: 'waiting',
           progress: 0,
           downloadUrl: null,
@@ -693,6 +673,12 @@ export default function App() {
               (result as any).task?.title ??
               prev.name
             ),
+            folderName: String(
+              (result as any).folderName ??
+              prev.folderName ??
+              (result as any).name ??
+              prev.name
+            ).trim(),
             status: completed ? 'completed' : result.status,
             progress: completed ? 100 : progress,
             downloadUrl: result.downloadUrl,
@@ -1536,7 +1522,7 @@ export default function App() {
                                 </span>
                               </div>
                               <div className="text-sm font-semibold text-slate-100 mt-1 truncate">
-                                {file ? file.name : (seedrNotice.name || 'Seedr download')}
+                                {seedrNotice.folderName || seedrNotice.name || 'Seedr download'}
                               </div>
                               <div className="text-[10px] text-slate-500 mt-0.5">
                                 {file ? formatBytes(file.size) : 'Resolving torrent files'}
