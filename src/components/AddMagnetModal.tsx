@@ -72,7 +72,6 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
   const [pasteManifestText, setPasteManifestText] = useState('');
   const [inspectedHash, setInspectedHash] = useState('');
   const [backgroundMode, setBackgroundMode] = useState(false);
-  const [seedrPreparedTaskId, setSeedrPreparedTaskId] = useState<number | string | null>(null);
 
   const inspectTimeoutRef = useRef<any>(null);
   const [copiedMagnet, setCopiedMagnet] = useState(false);
@@ -87,7 +86,6 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       setInspectedHash('');
       setInspectionSource('');
       setCopiedMagnet(false);
-      setSeedrPreparedTaskId(null);
     }
 
     if (isOpen) {
@@ -291,7 +289,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
 
   const isSingleFile = inspectedFiles.length === 1;
   const isSearchGrab = /^\/api\/search\/torrents\/grab\//i.test(magnetInput.trim());
-  const isDirectSeedrPrepared = Boolean(seedrPreparedTaskId);
+
   const isDirectSeedrSource =
     !isSearchGrab &&
     (/^magnet:\?/i.test(magnetInput.trim()) || /^[a-f0-9]{40}$/i.test(magnetInput.trim()));
@@ -366,16 +364,6 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     }
   };
 
-  const cancelPreparedSeedrTask = async () => {
-    if (seedrPreparedTaskId != null) {
-      await api.deleteSeedrTask(seedrPreparedTaskId).catch(() => undefined);
-      setSeedrPreparedTaskId(null);
-    }
-    setInspectedFiles([]);
-    setInspectionSource('');
-    onClose();
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!magnetInput.trim()) {
@@ -383,94 +371,15 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       return;
     }
 
-    // Direct magnets are prepared by Seedr itself. Seedr pauses the task
-    // before a multi-file torrent can start, so the user can review the
-    // contents first.
-    if (isDirectSeedrSource) {
-      try {
-        setError('');
-        setIsLoading(true);
-
-        if (!seedrPreparedTaskId) {
-          setIsInspecting(true);
-          const prepared = await api.prepareSeedrMagnet(magnetInput.trim());
-
-          const files = (prepared.files || []).map((file, index) => ({
-            index,
-            name: file.name,
-            size: Number(file.size || 0),
-            type: classifyFileType(file.name),
-            selected: true,
-          }));
-
-          if (files.length === 0) {
-            setError('Seedr accepted the magnet, but its file list is not ready yet. Try again.');
-            return;
-          }
-
-          setSeedrPreparedTaskId(prepared.taskId);
-          setInspectedFiles(files);
-          setCustomFileCount(files.length);
-          setInspectionSource(
-            files.length > 1
-              ? 'Seedr found multiple files. The task is paused until you confirm.'
-              : 'Seedr found one file. Starting download…'
-          );
-
-          if (files.length === 1) {
-            const file = files[0];
-            await onAdd(
-              magnetInput.trim(),
-              category,
-              [file.index],
-              [{ name: file.name, size: file.size, priority: 1 }],
-              undefined,
-              'seedr',
-              [file.name],
-              prepared.taskId
-            );
-            setSeedrPreparedTaskId(null);
-            onClose();
-          }
-
-          return;
-        }
-
-        // Multi-file direct magnets reach here only after the user presses
-        // the confirmation button. The prepared Seedr task is then resumed.
-        const selected = inspectedFiles.filter(file => file.selected);
-        if (selected.length === 0) {
-          setError('Select at least one file to download.');
-          return;
-        }
-
-        const manifest = inspectedFiles.map(file => ({
-          name: file.name,
-          size: file.size,
-          priority: file.selected ? 1 : 0
-        }));
-
-        await onAdd(
-          magnetInput.trim(),
-          category,
-          selected.map(file => file.index),
-          manifest,
-          undefined,
-          'seedr',
-          selected.map(file => file.name),
-          seedrPreparedTaskId
-        );
-
-        setSeedrPreparedTaskId(null);
-        onClose();
-      } catch (err) {
-        setError((err as any)?.message || 'Seedr could not prepare the magnet link.');
-      } finally {
-        setIsInspecting(false);
-        setIsLoading(false);
-      }
+    // For a pasted magnet we must know whether it contains one file or
+    // multiple files before deciding which backend to use. Seedr can start
+    // fetching as soon as it receives a task, so multi-file magnets are
+    // inspected with qBittorrent first and remain paused until confirmed.
+    if (isDirectSeedrSource && inspectedFiles.length === 0) {
+      await triggerInspect(magnetInput.trim());
       return;
     }
+
 
     if (isInspecting) {
       setError('Please wait while the torrent file list is being loaded.');
@@ -607,9 +516,8 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
             </div>
           </div>
           <button
-            onClick={() => void cancelPreparedSeedrTask()}
+            onClick={onClose}
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition"
-            aria-label="Cancel"
           >
             <X className="w-5 h-5" />
           </button>
@@ -723,7 +631,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
                 </div>
 
                 {/* Bulk selection pills */}
-                {!isDirectSeedrPrepared && <div className="flex items-center gap-1.5 text-xs">
+                <div className="flex items-center gap-1.5 text-xs">
                   <button
                     type="button"
                     onClick={() => selectAll(true)}
@@ -754,7 +662,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
                       Audio Only
                     </button>
                   )}
-                </div>}
+                </div>
               </div>
 
               {/* File item list */}
@@ -826,9 +734,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
         {/* Modal Footer */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 px-3 sm:px-5 py-3 border-t border-slate-800 bg-slate-900/95">
           <div className="text-[11px] sm:text-xs text-slate-400 w-full sm:w-auto">
-            {isDirectSeedrPrepared ? (
-               <span>{inspectedFiles.length} file{inspectedFiles.length === 1 ? '' : 's'} found • Seedr is paused — review before starting</span>
-             ) : isSingleFile && inspectedFiles.length > 0 ? (
+            {isSingleFile && inspectedFiles.length > 0 ? (
               <span>Ready to download</span>
             ) : selectedCount > 0 ? (
               <span>Downloading <strong className="text-cyan-400">{selectedCount}</strong> file(s) ({formatBytes(totalSelectedSize)}) • {inspectedFiles.length - selectedCount} skipped</span>
@@ -850,9 +756,9 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
             <button
               type="button"
               onClick={() => {
-                if (isDirectSeedrSource) {
-                  void handleSubmit({ preventDefault: () => {} } as React.FormEvent);
-                } else if (selectedCount > 0) {
+                if (isDirectSeedrSource && inspectedFiles.length === 0) {
+                  void triggerInspect(magnetInput.trim());
+                } else if (isDirectSeedrSource || selectedCount > 0) {
                   void handleSubmit({ preventDefault: () => {} } as React.FormEvent);
                 } else if (magnetInput.trim() && !isInspecting) {
                   void triggerInspect(magnetInput.trim());
