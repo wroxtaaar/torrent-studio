@@ -420,6 +420,17 @@ async def torrents_add(body: dict[str, Any]):
         if not SEEDR_LIBRARY_FOLDER_ID.isdigit():
             raise HTTPException(503, "SEEDR_LIBRARY_FOLDER_ID must be configured for Seedr downloads")
 
+        # The qBittorrent metadata-only torrent is only a temporary
+        # inspection helper. Once Seedr is selected, remove that preview
+        # immediately so it never appears as a real paused download.
+        if existing_hash:
+            try:
+                await qbt.delete(existing_hash, delete_files=False)
+            except Exception:
+                # The preview may already have disappeared; Seedr should not
+                # fail just because cleanup was unsuccessful.
+                pass
+
         if seedr_task_id:
             return {
                 "backend": "seedr",
