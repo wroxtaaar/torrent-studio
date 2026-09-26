@@ -7,19 +7,13 @@ on:
 
 concurrency:
   group: torrent-studio-personal-deploy
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Wait for push burst to settle
-        run: |
-          set -euo pipefail
-          echo "Waiting 2 minutes for additional commits..."
-          sleep 120
-
       - name: Deploy latest personal commit to Oracle VPS
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
@@ -49,10 +43,10 @@ jobs:
           LATEST_SHA="$(git rev-parse origin/personal)"
 
           if [ "$LATEST_SHA" != "$TRIGGER_SHA" ]; then
-            echo "A newer commit arrived during the 2-minute wait."
+            echo "A newer commit arrived before deployment."
             echo "Triggered by: $TRIGGER_SHA"
             echo "Latest commit: $LATEST_SHA"
-            echo "Skipping this deployment; the latest workflow run will handle it."
+            echo "Skipping this deployment; the newer workflow run will handle it."
             exit 0
           fi
 
