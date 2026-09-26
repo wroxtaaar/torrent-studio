@@ -1,7 +1,7 @@
 import bencode from 'bencode';
 import crypto from 'crypto';
 import type { Express, Request, Response, NextFunction } from 'express';
-import { addSeedrTask, canUseSeedr, getSeedrTaskStatus, findSeedrTaskByHash, getSeedrFileDownload, getSeedrFilePresentation, deleteSeedrFile, deleteSeedrFolder, getSeedrFolderDownload, getSeedrQuota, isSeedrConfigured, listSeedrLibrary, seedrMaxSizeBytes } from './seedr.ts';
+import { addSeedrTask, pauseSeedrTask, resumeSeedrTask, getSeedrTaskSelection, canUseSeedr, getSeedrTaskStatus, findSeedrTaskByHash, getSeedrFileDownload, getSeedrFilePresentation, deleteSeedrFile, deleteSeedrFolder, getSeedrFolderDownload, getSeedrQuota, isSeedrConfigured, listSeedrLibrary, seedrMaxSizeBytes } from './seedr.ts';
 
 type QbtConfig = {
   baseUrl: string;
@@ -546,6 +546,53 @@ async function inspectMetadata(source: string) {
 }
 
 export function installQbtProxy(app: Express) {
+  app.post('/api/seedr/tasks/prepare', async (req: Request, res: Response) => {
+    try {
+      if (!isSeedrConfigured()) return res.status(503).json({ error: 'Seedr is not configured' });
+
+      const magnet = String(req.body?.magnet || '').trim();
+      if (!/^magnet:\?/i.test(magnet)) {
+        return res.status(400).json({ error: 'A magnet link is required' });
+      }
+
+      const infoHash = extractInfoHash(magnet);
+      let task = infoHash ? await findSeedrTaskByHash(infoHash) : null;
+      let created = false;
+
+      if (!task) {
+        task = await addSeedrTask(magnet);
+        created = true;
+      }
+
+      const taskId = task?.user_torrent_id ?? task?.id ?? null;
+      if (taskId == null) return res.status(502).json({ error: 'Seedr did not return a task ID' });
+
+      // For a newly prepared direct magnet, pause immediately so a multi-file
+      // torrent never starts downloading before the user confirms.
+      if (created) {
+        try {
+          await pauseSeedrTask(taskId);
+        } catch (pauseError) {
+          console.warn('[SEEDR] Could not pause newly prepared task:', pauseError?.message || pauseError);
+        }
+      }
+
+      const selection = await getSeedrTaskSelection(taskId);
+      return res.json({
+        taskId,
+        name: String(selection.task?.name ?? selection.task?.title ?? ''),
+        files: selection.files,
+        created,
+        paused: true,
+      });
+    } catch (error: any) {
+      console.error('[SEEDR] Prepare task failed:', error?.message || error);
+      return res.status(Number(error?.status) || 502).json({
+        error: error?.message || 'Failed to prepare Seedr task'
+      });
+    }
+  });
+
   app.get('/api/seedr/tasks/:taskId', async (req: Request, res: Response) => {
     try {
       const taskId = String(req.params.taskId || '').trim();
@@ -1034,11 +1081,23 @@ export function installQbtProxy(app: Express) {
 
           const infoHash = extractInfoHash(directMagnet);
           let seedrTask: any = infoHash ? await findSeedrTaskByHash(infoHash) : null;
+          const selectedNames = Array.isArray(body.selectedNames)
+            ? body.selectedNames.map((name: any) => String(name || '').split('/').pop()).filter(Boolean)
+            : [];
+          const hasSelection = selectedNames.length > 0;
+
           if (!seedrTask) {
             seedrTask = await addSeedrTask(directMagnet);
           }
 
           const seedrTaskId = seedrTask?.user_torrent_id ?? seedrTask?.id ?? null;
+          if (seedrTaskId == null) {
+            throw new Error('Seedr did not return a task ID');
+          }
+
+          if (hasSelection) {
+            await resumeSeedrTask(seedrTaskId);
+          }
           console.log('[SEEDR-DIRECT] Seedr response:', JSON.stringify(seedrTask));
 
           return res.json({
