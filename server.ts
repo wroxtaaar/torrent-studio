@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import http from 'http';
 import https from 'https';
 import * as archiver from 'archiver';
+import * as bencode from 'bencode';
 import { installQbtProxy } from './src/qbtProxy.ts';
 import type {
   StorageFile, StorageFolder, UserProfile, StorageStats,
@@ -49,6 +50,7 @@ type TorrentSearchGrab = {
   expiresAt: number;
   query?: string;
   guid?: string;
+  resolvedMagnet?: string;
 };
 
 const torrentSearchGrabs = new Map<string, TorrentSearchGrab>(
@@ -488,6 +490,54 @@ function createTorrentSearchGrab(url: string, query?: string, guid?: string): st
   return '/api/search/torrents/grab/' + token;
 }
 
+function torrentBufferToMagnet(data: Buffer): string | null {
+  if (!data.length || data.length > 50 * 1024 * 1024) return null;
+
+  const text = data.toString('utf8').trim();
+  if (/^magnet:\?/i.test(text)) return text;
+
+  try {
+    const decoded: any = bencode.decode(data);
+    if (!decoded?.info) return null;
+
+    const infoEncoded = bencode.encode(decoded.info);
+    const hash = crypto.createHash('sha1').update(infoEncoded).digest('hex').toLowerCase();
+
+    const decodeText = (value: any): string => {
+      if (Buffer.isBuffer(value)) return value.toString('utf8');
+      if (value instanceof Uint8Array) return Buffer.from(value).toString('utf8');
+      return typeof value === 'string' ? value : '';
+    };
+
+    const name = decodeText(decoded.info.name);
+    const trackers: string[] = [];
+    const addTracker = (value: any) => {
+      const tracker = decodeText(value).trim();
+      if (tracker) trackers.push(tracker);
+    };
+
+    addTracker(decoded.announce);
+    if (Array.isArray(decoded['announce-list'])) {
+      for (const tier of decoded['announce-list']) {
+        if (Array.isArray(tier)) tier.forEach(addTracker);
+        else addTracker(tier);
+      }
+    }
+
+    const uniqueTrackers = [...new Set(trackers)];
+    return 'magnet:?xt=urn:btih:' + hash +
+      (name ? '&dn=' + encodeURIComponent(name) : '') +
+      uniqueTrackers.map(tracker => '&tr=' + encodeURIComponent(tracker)).join('');
+  } catch {
+    return null;
+  }
+}
+
+function cacheResolvedSearchMagnet(grab: TorrentSearchGrab, magnet: string) {
+  grab.resolvedMagnet = magnet;
+  grab.expiresAt = Date.now() + TORRENT_SEARCH_GRAB_TTL_MS;
+  persistTorrentSearchGrabs();
+}
 function purgeExpiredTorrentSearchGrabs() {
   const now = Date.now();
   let changed = false;
@@ -1062,8 +1112,15 @@ async function main() {
     }
 
     try {
-      // Prowlarr download endpoints may take the indexer's Cloudflare
-      // challenge path and can redirect to either a .torrent file or magnet.
+      // Reuse a previously resolved magnet so inspecting and adding the
+      // same search result does not repeat the protected indexer request.
+      if (grab.resolvedMagnet) {
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(200).send(grab.resolvedMagnet);
+      }
+
+      // Prowlarr download endpoints may take the indexer's Cloudflare      // challenge path and can redirect to either a .torrent file or magnet.
       // Use the Node HTTP client here so redirects are explicit and failures
       // expose the actual upstream URL/error instead of a generic fetch error.
       const upstream = await fetchExternalBuffer(grab.url, {
@@ -1079,6 +1136,7 @@ async function main() {
           : String(rawLocation || '');
 
         if (/^magnet:\?/i.test(location)) {
+          cacheResolvedSearchMagnet(grab, location);
           res.setHeader('Content-Type', 'text/plain; charset=utf-8');
           res.setHeader('Cache-Control', 'no-store');
           return res.status(200).send(location);
@@ -1096,6 +1154,7 @@ async function main() {
           });
 
           if (/^magnet:\?/i.test(grab.url)) {
+            cacheResolvedSearchMagnet(grab, grab.url);
             res.setHeader('Content-Type', 'text/plain; charset=utf-8');
             res.setHeader('Cache-Control', 'no-store');
             return res.status(200).send(grab.url);
@@ -1103,6 +1162,15 @@ async function main() {
 
           if (retry.status >= 200 && retry.status < 300) {
             if (!retry.data.length) return res.status(502).send('Prowlarr returned an empty torrent response after refresh');
+
+            const retryMagnet = torrentBufferToMagnet(retry.data);
+            if (retryMagnet && String(req.query.format || '').toLowerCase() !== 'torrent') {
+              cacheResolvedSearchMagnet(grab, retryMagnet);
+              res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+              res.setHeader('Cache-Control', 'no-store');
+              return res.status(200).send(retryMagnet);
+            }
+
             const contentTypeRetry = Array.isArray(retry.headers['content-type'])
               ? String(retry.headers['content-type'][0] || '')
               : String(retry.headers['content-type'] || '');
@@ -1123,6 +1191,14 @@ async function main() {
 
       const data = upstream.data;
       if (!data.length) return res.status(502).send('Prowlarr returned an empty torrent file');
+
+      const resolvedMagnet = torrentBufferToMagnet(data);
+      if (resolvedMagnet && String(req.query.format || '').toLowerCase() !== 'torrent') {
+        cacheResolvedSearchMagnet(grab, resolvedMagnet);
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(200).send(resolvedMagnet);
+      }
 
       const rawContentType = upstream.headers['content-type'];
       const rawDisposition = upstream.headers['content-disposition'];
