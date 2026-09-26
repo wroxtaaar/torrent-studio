@@ -490,6 +490,44 @@ export default function App() {
     }
   };
 
+  const handleStreamSeedrFile = async (file: { id: string; name: string; size: number; folderId: string; folderPath: string }) => {
+    try {
+      const type: StorageFile['type'] =
+        /\.(mkv|mp4|m4v|webm|mov|avi|m3u8|ts)$/i.test(file.name) ? 'video' :
+        /\.(mp3|wav|flac|aac|ogg|m4a)$/i.test(file.name) ? 'audio' :
+        'document';
+
+      if (type !== 'video' && type !== 'audio') {
+        setSeedrError('This Seedr file is not a supported video or audio file.');
+        return;
+      }
+
+      setSeedrError(null);
+      const result = await api.getSeedrFileStream(file.id, type);
+      const syntheticFile: StorageFile = {
+        id: `seedr-${file.id}`,
+        name: result.name || file.name,
+        path: file.folderPath === '/' ? `/${file.name}` : `${file.folderPath}/${file.name}`,
+        folder: file.folderPath,
+        size: file.size,
+        type,
+        mimeType: type === 'video' ? 'video/mp4' : 'audio/mpeg',
+        createdAt: Date.now(),
+        ownerId: activeUser?.id || 'user_admin',
+        ownerName: activeUser?.name || 'Admin',
+        isStreamable: true,
+        streamUrl: result.url,
+        downloadUrl: result.url,
+      };
+
+      setActiveMediaFile(syntheticFile);
+      setIsPlayerMinimized(false);
+    } catch (error) {
+      console.error('Failed to create Seedr stream URL:', error);
+      setSeedrError(error instanceof Error ? error.message : 'Failed to create Seedr stream URL');
+    }
+  };
+
   const handleDeleteSeedrFile = async (file: { id: string; name: string; size: number; folderId: string; folderPath: string }) => {
     const confirmed = window.confirm(
       `Delete "${file.name}" from Seedr? This permanently removes the file from your Seedr account.`
@@ -1002,6 +1040,15 @@ export default function App() {
                         </div>
                       </div>
                       <div className="shrink-0 flex items-center gap-1.5">
+                        {/\.(mkv|mp4|m4v|webm|mov|avi|m3u8|ts|mp3|wav|flac|aac|ogg|m4a)$/i.test(file.name) && (
+                          <button
+                            type="button"
+                            onClick={() => handleStreamSeedrFile(file)}
+                            className="px-2.5 py-1.5 rounded-lg bg-cyan-500 text-slate-950 font-bold text-xs hover:bg-cyan-400 transition"
+                          >
+                            Stream
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => handleDownloadSeedrFile(file.id)}
