@@ -113,6 +113,7 @@ export default function App() {
     progress: number;
     downloadUrl: string | null;
     files: Array<{ id: string; name: string; size: number; url: string | null }>;
+    seedrReply: string;
   };
 
   const seedrNoticeStorageKey = 'seedflow_seedr_notice';
@@ -129,6 +130,7 @@ export default function App() {
         progress: Math.max(0, Math.min(100, Number(parsed.progress) || 0)),
         downloadUrl: typeof parsed.downloadUrl === 'string' ? parsed.downloadUrl : null,
         files: Array.isArray(parsed.files) ? parsed.files : [],
+        seedrReply: String(parsed.seedrReply || ''),
       };
     } catch {
       return null;
@@ -445,7 +447,7 @@ export default function App() {
     selectedFiles?: number[],
     manifest?: { name: string; size: number; priority: number }[],
     existingHash?: string,
-    forceBackend?: 'qbittorrent'
+    forceBackend?: 'seedr' | 'qbittorrent'
   ) => {
     try {
       if (seedrDownloadActive && forceBackend !== 'qbittorrent') {
@@ -465,6 +467,11 @@ export default function App() {
           progress: 0,
           downloadUrl: null,
           files: [],
+          seedrReply: (() => {
+            const response: any = result.seedrResponse;
+            const state = response?.state ?? response?.task?.state ?? response?.status ?? response?.task?.status;
+            return state ? `Seedr replied: ${String(state)}` : 'Seedr replied: task accepted';
+          })(),
         });
       } else {
         setSeedrNotice(null);
