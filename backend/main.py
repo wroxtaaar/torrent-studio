@@ -17,8 +17,6 @@ import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-
 from backend.qbt import qbt
 
 
@@ -239,9 +237,6 @@ def file_response(path: Path, download: bool = False) -> FileResponse:
     return FileResponse(path, media_type=mime_for(path.name), headers=headers)
 
 
-class JsonBody(BaseModel):
-    model_config = {"extra": "allow"}
-
 
 app = FastAPI(title="Torrent Studio Python Backend", version="1.0.0")
 
@@ -298,27 +293,27 @@ async def torrents_export(hash: str):
 
 
 @app.post("/api/v2/torrents/filePrio")
-async def torrents_file_prio(body: JsonBody):
+async def torrents_file_prio(body: dict[str, Any]):
     return await qbt.file_priority(str(body.get("hash", "")), str(body.get("id", "")), int(body.get("priority", 1)))
 
 
 @app.post("/api/v2/torrents/pause")
-async def torrents_pause(body: JsonBody):
+async def torrents_pause(body: dict[str, Any]):
     return await qbt.pause(str(body.get("hashes") or body.get("hash") or ""))
 
 
 @app.post("/api/v2/torrents/resume")
-async def torrents_resume(body: JsonBody):
+async def torrents_resume(body: dict[str, Any]):
     return await qbt.resume(str(body.get("hashes") or body.get("hash") or ""))
 
 
 @app.post("/api/v2/torrents/delete")
-async def torrents_delete(body: JsonBody):
+async def torrents_delete(body: dict[str, Any]):
     return await qbt.delete(str(body.get("hashes") or body.get("hash") or ""), bool(body.get("deleteFiles", False)))
 
 
 @app.post("/api/v2/torrents/add")
-async def torrents_add(body: JsonBody):
+async def torrents_add(body: dict[str, Any]):
     urls = str(body.get("urls") or "").strip()
     if not urls:
         raise HTTPException(400, "urls is required")
@@ -336,7 +331,7 @@ async def torrents_add(body: JsonBody):
 
 
 @app.post("/api/v2/torrents/inspect-magnet")
-async def inspect_magnet(body: JsonBody):
+async def inspect_magnet(body: dict[str, Any]):
     magnet = str(body.get("magnet") or body.get("urls") or "").strip()
     if not magnet:
         raise HTTPException(400, "magnet is required")
@@ -344,7 +339,7 @@ async def inspect_magnet(body: JsonBody):
 
 
 @app.post("/api/v2/torrents/upload-torrent")
-async def upload_torrent(body: JsonBody):
+async def upload_torrent(body: dict[str, Any]):
     encoded = str(body.get("base64") or "")
     filename = str(body.get("filename") or "upload.torrent")
     if not encoded:
@@ -364,7 +359,7 @@ async def upload_torrent(body: JsonBody):
 
 
 @app.post("/api/torrents/metadata")
-async def torrent_metadata(body: JsonBody):
+async def torrent_metadata(body: dict[str, Any]):
     magnet = str(body.get("magnet") or "").strip()
     if not magnet:
         raise HTTPException(400, "magnet is required")
@@ -377,7 +372,7 @@ async def recent_get():
 
 
 @app.post("/api/search/recent")
-async def recent_add(body: JsonBody):
+async def recent_add(body: dict[str, Any]):
     query = str(body.get("query") or "").strip()
     if query:
         searches = read_json(RECENT_SEARCHES_FILE, [])
@@ -488,7 +483,7 @@ async def file_hls(identifier: str, asset: str):
 
 
 @app.post("/api/files/zip")
-async def files_zip(body: JsonBody):
+async def files_zip(body: dict[str, Any]):
     import zipfile
     ids = body.get("ids") or body.get("fileIds") or []
     if not ids:
@@ -502,14 +497,14 @@ async def files_zip(body: JsonBody):
 
 
 @app.post("/api/files/folder")
-async def create_folder(body: JsonBody):
+async def create_folder(body: dict[str, Any]):
     target = physical_from_relative(str(body.get("path") or body.get("name") or "New Folder"))
     target.mkdir(parents=True, exist_ok=True)
     return {"success": True}
 
 
 @app.post("/api/files/rename")
-async def rename_file(body: JsonBody):
+async def rename_file(body: dict[str, Any]):
     source = find_local_file_by_id(str(body.get("id") or body.get("fileId")))
     name = Path(str(body.get("name") or body.get("newName") or "")).name
     if not name:
@@ -520,7 +515,7 @@ async def rename_file(body: JsonBody):
 
 
 @app.post("/api/files/move")
-async def move_file(body: JsonBody):
+async def move_file(body: dict[str, Any]):
     source = find_local_file_by_id(str(body.get("id") or body.get("fileId")))
     destination = physical_from_relative(str(body.get("path") or body.get("destination") or ""))
     if destination.is_dir():
@@ -531,7 +526,7 @@ async def move_file(body: JsonBody):
 
 
 @app.post("/api/files/delete")
-async def delete_file(body: JsonBody):
+async def delete_file(body: dict[str, Any]):
     ids = body.get("ids") or body.get("fileIds") or [body.get("id") or body.get("fileId")]
     for identifier in ids:
         if identifier:
@@ -546,7 +541,7 @@ async def folders():
 
 
 @app.post("/api/folders/share")
-async def folder_share(body: JsonBody):
+async def folder_share(body: dict[str, Any]):
     path = str(body.get("path") or "/")
     existing = next((f for f in folder_meta if f.get("path") == path), None)
     if existing:
@@ -568,7 +563,7 @@ async def get_users():
 
 
 @app.post("/api/users/switch")
-async def switch_user(body: JsonBody):
+async def switch_user(body: dict[str, Any]):
     global active_user_id
     requested = str(body.get("userId") or body.get("id") or "")
     if not any(u["id"] == requested for u in users):
@@ -578,7 +573,7 @@ async def switch_user(body: JsonBody):
 
 
 @app.post("/api/users/create")
-async def create_user(body: JsonBody):
+async def create_user(body: dict[str, Any]):
     user = {
         "id": str(body.get("id") or uuid.uuid4()), "name": str(body.get("name") or "User"),
         "email": str(body.get("email") or ""), "role": str(body.get("role") or "user"),
@@ -605,7 +600,7 @@ async def cleanup_get():
 
 
 @app.post("/api/cleanup/settings")
-async def cleanup_set(body: JsonBody):
+async def cleanup_set(body: dict[str, Any]):
     cleanup_settings.update(body)
     write_json(CLEANUP_FILE, cleanup_settings)
     return cleanup_settings
@@ -667,7 +662,7 @@ async def qbt_settings():
 
 
 @app.post("/api/qbt/settings")
-async def qbt_settings_update(body: JsonBody):
+async def qbt_settings_update(body: dict[str, Any]):
     return {"success": True, "message": "Runtime settings are managed through environment variables."}
 
 
@@ -755,7 +750,7 @@ async def seedr_quota():
 
 
 @app.post("/api/seedr/tasks/prepare")
-async def seedr_prepare(body: JsonBody):
+async def seedr_prepare(body: dict[str, Any]):
     magnet = str(body.get("magnet") or "")
     if not SEEDR_TOKEN:
         raise HTTPException(503, "Seedr is not configured")
