@@ -1,7 +1,7 @@
 import bencode from 'bencode';
 import crypto from 'crypto';
 import type { Express, Request, Response, NextFunction } from 'express';
-import { addSeedrTask, canUseSeedr, getSeedrTaskStatus, getSeedrFileDownload, getSeedrFilePresentation, deleteSeedrFile, deleteSeedrFolder, getSeedrFolderDownload, getSeedrQuota, isSeedrConfigured, listSeedrLibrary, seedrMaxSizeBytes } from './seedr.ts';
+import { addSeedrTask, canUseSeedr, getSeedrTaskStatus, findSeedrTaskByHash, getSeedrFileDownload, getSeedrFilePresentation, deleteSeedrFile, deleteSeedrFolder, getSeedrFolderDownload, getSeedrQuota, isSeedrConfigured, listSeedrLibrary, seedrMaxSizeBytes } from './seedr.ts';
 
 type QbtConfig = {
   baseUrl: string;
@@ -1018,8 +1018,23 @@ export function installQbtProxy(app: Express) {
                 remainingSpace: quota.remainingSpace,
               });
             }
-            const seedrSource = /^magnet:\?/i.test(urls) ? urls : (sourceHash || existingHash ? `magnet:?xt=urn:btih:${(sourceHash || existingHash).toLowerCase()}` : urls);
-            const seedrTask = await addSeedrTask(seedrSource);
+            const infoHash = (sourceHash || existingHash || '').toLowerCase();
+            const seedrSource = /^magnet:\?/i.test(urls)
+              ? urls
+              : (infoHash ? `magnet:?xt=urn:btih:${infoHash}` : urls);
+
+            // The qBittorrent preview is only a metadata helper. If the same
+            // torrent already exists in qBittorrent, that must NOT force the
+            // final download to qBittorrent. Seedr remains the preferred
+            // backend when the torrent fits and Seedr has capacity.
+            let seedrTask: any;
+            if (infoHash) {
+              seedrTask = await findSeedrTaskByHash(infoHash);
+            }
+            if (!seedrTask) {
+              seedrTask = await addSeedrTask(seedrSource);
+            }
+
             const previewHash = existingHash || rememberedHash || sourceHash;
             if (previewHash && await torrentExists(previewHash)) {
               await qbtJson('/api/v2/torrents/delete', {
