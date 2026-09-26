@@ -455,7 +455,7 @@ async def torrents_add(body: dict[str, Any]):
         seedr_result = _seedr_data(await seedr_request("/tasks", "POST", {
             "torrent_magnet": urls,
             "folder_id": int(SEEDR_LIBRARY_FOLDER_ID),
-        }))
+        }, form=True))
         if not isinstance(seedr_result, dict) or not seedr_result.get("success"):
             raise HTTPException(502, "Seedr did not accept the torrent task")
 
@@ -1025,7 +1025,7 @@ def _seedr_data(value: Any) -> Any:
     return value
 
 
-async def seedr_request(path: str, method: str = "GET", body: Any = None) -> Any:
+async def seedr_request(path: str, method: str = "GET", body: Any = None, form: bool = False) -> Any:
     if not SEEDR_TOKEN:
         raise HTTPException(503, "Seedr is not configured")
     endpoint = SEEDR_BASE.rstrip("/") + "/" + str(path).lstrip("/")
@@ -1033,10 +1033,16 @@ async def seedr_request(path: str, method: str = "GET", body: Any = None) -> Any
         "Authorization": f"Bearer {SEEDR_TOKEN}",
         "Accept": "application/json",
     }
+    request_kwargs: dict[str, Any] = {}
     if body is not None:
-        headers["Content-Type"] = "application/json"
+        if form:
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+            request_kwargs["data"] = body
+        else:
+            headers["Content-Type"] = "application/json"
+            request_kwargs["json"] = body
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        response = await client.request(method, endpoint, headers=headers, json=body)
+        response = await client.request(method, endpoint, headers=headers, **request_kwargs)
     text = response.text
     try:
         data = response.json() if text else None
@@ -1376,7 +1382,7 @@ async def seedr_prepare(body: dict[str, Any]):
     data = await seedr_request("/tasks", "POST", {
         "torrent_magnet": magnet,
         "folder_id": int(SEEDR_LIBRARY_FOLDER_ID),
-    })
+    }, form=True)
     task = _seedr_data(data)
     if not isinstance(task, dict):
         task = {}
