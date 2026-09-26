@@ -74,7 +74,7 @@ import { TorrentSearchPanel } from './components/TorrentSearchPanel.tsx';
 
 export default function App() {
   // Navigation & Theme
-  const [activeTab, setActiveTab] = useState<'search' | 'transfers' | 'files' | 'shared' | 'activity' | 'storage'>('transfers');
+  const [activeTab, setActiveTab] = useState<'search' | 'transfers' | 'files' | 'shared' | 'activity' | 'storage'>('search');
   const [theme, setTheme] = useState<'dark' | 'dim' | 'light'>(() => {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
