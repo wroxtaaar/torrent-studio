@@ -8,17 +8,9 @@ export function formatBytes(bytes: number, decimals = 2): string {
 }
 
 export function formatQuotaBytes(bytes: number): string {
-  if (!bytes || bytes <= 0) return '0 MB';
+  if (!bytes || bytes <= 0) return '0 GB';
   const gb = 1024 ** 3;
-  const mb = 1024 ** 2;
-
-  if (bytes >= gb) {
-    const wholeGb = Math.floor(bytes / gb);
-    const remainingMb = Math.round((bytes - wholeGb * gb) / mb);
-    return remainingMb > 0 ? `${wholeGb} GB ${remainingMb} MB` : `${wholeGb} GB`;
-  }
-
-  return `${Math.round(bytes / mb)} MB`;
+  return `${(bytes / gb).toFixed(1)} GB`;
 }
 
 export function formatSpeed(bytesPerSec: number): string {
