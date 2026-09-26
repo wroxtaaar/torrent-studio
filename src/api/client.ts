@@ -202,6 +202,14 @@ export const api = {
     return data;
   },
 
+  async deleteSeedrFile(fileId: string): Promise<void> {
+    const res = await fetch('/api/seedr/files/' + encodeURIComponent(fileId), { method: 'DELETE' });
+    const body = await res.text();
+    let data: any = null;
+    try { data = body ? JSON.parse(body) : null; } catch { data = null; }
+    if (!res.ok) throw new Error(data?.error || body || 'Failed to delete Seedr file');
+  },
+
   async getSeedrTask(taskId: number | string): Promise<{
     taskId: number | string;
     status: 'waiting' | 'downloading' | 'completed';
