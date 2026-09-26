@@ -563,7 +563,7 @@ export function installQbtProxy(app: Express) {
     }
   });
 
-  app.get('/api/seedr/files/:fileId/stream', async (req: Request, res: Response) => {
+  app.get('/api/seedr/files/stream', async (req: Request, res: Response) => {
     try {
       const fileId = String(req.params.fileId || '').trim();
       const type = String(req.query.type || '').toLowerCase();
