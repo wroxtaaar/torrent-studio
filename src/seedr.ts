@@ -337,7 +337,20 @@ async function collectSeedrFiles(
 ): Promise<SeedrLibraryFile[]> {
   if (depth > 8) return [];
 
-  const payload = await getFolderContents(folderId);
+  let payload: any;
+  try {
+    payload = await getFolderContents(folderId);
+  } catch (error) {
+    // Seedr keeps completed tasks in /tasks even after their created
+    // folder has been deleted. Treat a missing folder as an empty library
+    // branch instead of surfacing a noisy 404 to the user.
+    if (getStatus(error) === 404) {
+      console.warn('[SEEDR] Library folder no longer exists; skipping:', String(folderId));
+      return [];
+    }
+    throw error;
+  }
+
   const files = extractFiles(payload, String(folderId)).map(file => ({
     id: file.id,
     name: file.name,
