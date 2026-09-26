@@ -175,7 +175,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
           return;
         }
 
-        setInspectionSource('✓ qBittorrent file metadata loaded • Torrent remains paused until you select files');
+        setInspectionSource('✓ qBittorrent metadata loaded • Multi-file torrent stays paused while you choose files');
         return;
       }
 
@@ -212,7 +212,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
               return;
             }
 
-            setInspectionSource('✓ qBittorrent file metadata loaded • Torrent is paused');
+            setInspectionSource('✓ qBittorrent metadata loaded • Multi-file torrent stays paused while you choose files');
             return;
           }
         } catch {
@@ -406,7 +406,14 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     try {
       setIsLoading(true);
       setError('');
-      await onAdd(magnetInput.trim(), category, selectedFileIndexes, manifest, inspectedHash || undefined);
+       await onAdd(
+         magnetInput.trim(),
+         category,
+         selectedFileIndexes,
+         manifest,
+         inspectedHash || undefined,
+         isDirectSeedrSource && inspectedFiles.length > 1 ? 'qbittorrent' : undefined
+       );
       setBackgroundMode(false);
       onClose();
     } catch (err: any) {
@@ -615,18 +622,14 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
                   <div className="flex items-center gap-2">
                     <FileCheck className="w-4 h-4 text-cyan-400" />
                     <span className="text-xs font-bold text-white">
-                      {isDirectSeedrPrepared
-                        ? 'Review torrent contents before download'
-                        : `Which files do you want to download? (${inspectedFiles.length} files found)`}
+                      Which files do you want to download? ({inspectedFiles.length} files found)
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-0.5">
                     {inspectionSource && (
                       <span className="text-cyan-400 font-medium mr-2">{inspectionSource} •</span>
                     )}
-                    {isDirectSeedrPrepared
-                      ? 'Seedr has paused this task. Nothing will download until you confirm.'
-                      : 'Only checked files will be downloaded. Unchecked files will be skipped.'}
+                    Only checked files will be downloaded. Unchecked files will be skipped.
                   </p>
                 </div>
 
