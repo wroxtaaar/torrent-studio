@@ -2213,7 +2213,7 @@ export default function App() {
           setInitialMagnet('');
         }}
         onOpen={() => {
-          openAddMagnet();
+          openAddMagnet(initialMagnet);
         }}
         onAdd={handleAddMagnet}
         defaultFolder={currentFolder === '/' ? 'Downloads' : currentFolder.replace('/', '')}
