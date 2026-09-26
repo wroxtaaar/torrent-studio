@@ -21,6 +21,7 @@ async def seedr_request(method: str, path: str, **kwargs):
     if not SEEDR_TOKEN:
         raise HTTPException(503, "SEEDR_API_TOKEN is not configured")
     headers = {"Authorization": "Bearer " + SEEDR_TOKEN, "Accept": "application/json"}
+    headers.update(kwargs.pop("headers", {}) or {})
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.request(method, SEEDR_BASE + path, headers=headers, **kwargs)
     if response.status_code >= 400:
