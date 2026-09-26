@@ -38,7 +38,7 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
       const saved = localStorage.getItem('seedflow_recent_searches');
       const parsed = saved ? JSON.parse(saved) : [];
       return Array.isArray(parsed)
-        ? parsed.filter((value): value is string => typeof value === 'string').slice(0, 7)
+        ? parsed.filter((value): value is string => typeof value === 'string').slice(0, 10)
         : [];
     } catch {
       return [];
@@ -116,7 +116,7 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
       setShowRecentSearches(false);
       setError('');
       saveRecentSearch(trimmed);
-      const data = await api.searchTorrents(trimmed, 50);
+      const data = await api.searchTorrents(trimmed, 10);
       setResults(data);
       setSearched(true);
 
