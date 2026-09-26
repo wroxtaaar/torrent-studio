@@ -17,6 +17,22 @@ export function canUseSeedr(totalSize: number): boolean {
     totalSize <= SEEDR_MAX_SIZE_BYTES;
 }
 
+export type SeedrQuota = {
+  maxSpace: number;
+  usedSpace: number;
+  remainingSpace: number;
+};
+
+export async function getSeedrQuota(): Promise<SeedrQuota> {
+  const result = await seedrRequest('/me/quota');
+  const data = unwrapData(result);
+  const maxSpace = Number(data?.max_space ?? data?.maxSpace ?? data?.storage?.max ?? data?.quota?.max_space ?? 0);
+  const usedSpace = Number(data?.used_space ?? data?.usedSpace ?? data?.storage?.used ?? data?.quota?.used_space ?? 0);
+  const remainingSpace = Math.max(0, maxSpace - usedSpace);
+
+  return { maxSpace, usedSpace, remainingSpace };
+}
+
 function getStatus(error: unknown): number | undefined {
   const status = Number((error as any)?.status);
   return Number.isFinite(status) && status > 0 ? status : undefined;
