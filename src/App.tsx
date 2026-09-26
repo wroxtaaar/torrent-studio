@@ -162,6 +162,37 @@ export default function App() {
     }
   });
 
+  // Merge files that Seedr has already exposed for the active task into the
+  // library view immediately. They may not be present in /api/seedr/files yet
+  // because the torrent is still downloading.
+  const seedrDisplayFiles = useMemo(() => {
+    const completed = seedrFiles.map(file => ({
+      ...file,
+      downloadProgress: undefined as number | undefined,
+      downloading: false,
+    }));
+
+    if (!seedrNotice?.taskId || seedrNotice.status === 'not_found' || !seedrNotice.files.length) {
+      return completed;
+    }
+
+    const live = seedrNotice.files.map(file => ({
+      id: file.id,
+      name: file.name,
+      size: file.size,
+      folderId: file.folderId || '__root__',
+      folderPath: file.folderPath || '/Torrent Studio',
+      downloadProgress: Math.max(0, Math.min(100, Number(seedrNotice.progress) || 0)),
+      downloading: seedrNotice.status !== 'completed' || !file.url,
+    }));
+
+    const liveIds = new Set(live.map(file => file.id));
+    return [
+      ...completed.filter(file => !liveIds.has(file.id)),
+      ...live,
+    ];
+  }, [seedrFiles, seedrNotice]);
+
   const seedrFolderGroups = useMemo(() => {
     const groups = new Map<string, {
       folderId: string;
@@ -171,7 +202,7 @@ export default function App() {
       totalSize: number;
     }>();
 
-    for (const file of seedrFiles) {
+    for (const file of seedrDisplayFiles) {
       const folderId = file.folderId || '__root__';
       const path = file.folderPath || '/';
       const parts = path.split('/').filter(Boolean);
@@ -193,7 +224,7 @@ export default function App() {
     }
 
     return Array.from(groups.values()).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
-  }, [seedrFiles]);
+  }, [seedrDisplayFiles]);
 
   useEffect(() => {
     if (selectedSeedrFolderId !== null && !seedrFolderGroups.some(folder => folder.folderId === selectedSeedrFolderId)) {
@@ -1544,7 +1575,7 @@ export default function App() {
                     <span>Seedr Library</span>
                     {seedrConfigured && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
-                        {seedrFiles.length} files
+                        {seedrDisplayFiles.length} files
                       </span>
                     )}
                   </h2>
@@ -1605,13 +1636,13 @@ export default function App() {
                 </div>
               )}
 
-              {!seedrLoading && !seedrError && seedrConfigured && seedrFiles.length === 0 && (
+              {!seedrLoading && !seedrError && seedrConfigured && seedrDisplayFiles.length === 0 && (
                 <div className="mt-3 rounded-xl bg-slate-900/70 border border-slate-800 px-3 py-3 text-xs text-slate-400">
                   No completed files are currently visible in your Seedr library.
                 </div>
               )}
 
-              {seedrConfigured && seedrFiles.length > 0 && (
+              {seedrConfigured && seedrDisplayFiles.length > 0 && (
                 <div className="mt-3">
                   {selectedSeedrFolderId === null ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1698,7 +1729,23 @@ export default function App() {
                               >
                                 <div className="min-w-0">
                                   <div className="truncate text-sm font-medium text-slate-200">{file.name}</div>
-                                  <div className="text-[10px] text-slate-500 mt-0.5">{formatBytes(file.size)}</div>
+                                  <div className="text-[10px] text-slate-500 mt-0.5">
+                                    {formatBytes(file.size)}
+                                    {file.downloading ? ' • Downloading' : ''}
+                                  </div>
+                                  {file.downloadProgress != null && (
+                                    <div className="mt-1.5 flex items-center gap-2 max-w-sm">
+                                      <div className="h-1.5 flex-1 rounded-full bg-slate-800 overflow-hidden">
+                                        <div
+                                          className="h-full rounded-full bg-emerald-400 transition-all duration-500"
+                                          style={{ width: Math.max(0, Math.min(100, file.downloadProgress)) + '%' }}
+                                        />
+                                      </div>
+                                      <span className="shrink-0 text-[10px] font-mono font-semibold text-emerald-300">
+                                        {Number(file.downloadProgress).toFixed(0)}%
+                                      </span>
+                                    </div>
+                                  )}
                                 </div>
                                 <div className="shrink-0 flex items-center gap-1.5">
                                   {/\.(mkv|mp4|m4v|webm|mov|avi|m3u8|ts|mp3|wav|flac|aac|ogg|m4a)$/i.test(file.name) && (
