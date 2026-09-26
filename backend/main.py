@@ -1250,7 +1250,9 @@ def _seedr_task_complete(task: dict[str, Any]) -> bool:
     progress = _seedr_progress_value(
         task.get("progress") if task.get("progress") is not None else nested.get("progress")
     )
-    return state in {"finished", "completed", "complete"} or (progress is not None and progress >= 100)
+    return state in {
+        "finished", "completed", "complete", "seeding", "stopped", "idle"
+    } or (progress is not None and progress >= 100)
 
 
 async def _seedr_task(task_id: str) -> Any:
@@ -1293,29 +1295,7 @@ async def _seedr_task_contents(task_id: str) -> list[dict[str, Any]]:
 
 
 async def _seedr_download_url(file_id: str) -> dict[str, str]:
-    file_id = str(file_id)
-
-    # Prefer the V2 presentation endpoint for playable media, then fall back
-    # to the canonical temporary download URL.
-    try:
-        presentation = _seedr_data(
-            await seedr_request(f"/presentations/file/{quote(file_id)}/video")
-        )
-        if isinstance(presentation, dict):
-            link = presentation.get("link") if isinstance(presentation.get("link"), dict) else {}
-            url = str(
-                presentation.get("url")
-                or presentation.get("stream_url")
-                or presentation.get("streamUrl")
-                or link.get("url")
-                or ""
-            )
-            if url:
-                return {"url": url, "name": str(presentation.get("name") or "")}
-    except Exception:
-        pass
-
-    payload = _seedr_data(await seedr_request(f"/download/file/{quote(file_id)}/url"))
+    payload = _seedr_data(await seedr_request(f"/download/file/{quote(str(file_id))}/url"))
     if isinstance(payload, dict):
         url = str(
             payload.get("url")
