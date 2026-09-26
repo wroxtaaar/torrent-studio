@@ -1,7 +1,7 @@
 import bencode from 'bencode';
 import crypto from 'crypto';
 import type { Express, Request, Response, NextFunction } from 'express';
-import { addSeedrTask, canUseSeedr, getSeedrTaskStatus, getSeedrFileDownload, deleteSeedrFile, isSeedrConfigured, listSeedrLibrary, seedrMaxSizeBytes } from './seedr.ts';
+import { addSeedrTask, canUseSeedr, getSeedrTaskStatus, getSeedrFileDownload, getSeedrFilePresentation, deleteSeedrFile, isSeedrConfigured, listSeedrLibrary, seedrMaxSizeBytes } from './seedr.ts';
 
 type QbtConfig = {
   baseUrl: string;
@@ -559,6 +559,26 @@ export function installQbtProxy(app: Express) {
       console.error('[SEEDR] Library listing failed:', error?.message || error);
       return res.status(Number(error?.status) || 502).json({
         error: error?.message || 'Seedr library request failed'
+      });
+    }
+  });
+
+  app.get('/api/seedr/files/:fileId/stream', async (req: Request, res: Response) => {
+    try {
+      const fileId = String(req.params.fileId || '').trim();
+      const type = String(req.query.type || '').toLowerCase();
+      if (!fileId) return res.status(400).json({ error: 'fileId is required' });
+      if (type !== 'video' && type !== 'audio') {
+        return res.status(400).json({ error: 'type must be video or audio' });
+      }
+      if (!isSeedrConfigured()) return res.status(503).json({ error: 'Seedr is not configured' });
+
+      const result = await getSeedrFilePresentation(fileId, type);
+      return res.json(result);
+    } catch (error: any) {
+      console.error('[SEEDR] Stream URL failed:', error?.message || error);
+      return res.status(Number(error?.status) || 502).json({
+        error: error?.message || 'Seedr stream URL failed'
       });
     }
   });
