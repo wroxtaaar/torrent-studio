@@ -316,6 +316,10 @@ export async function addSeedrTask(magnet: string): Promise<any> {
   });
 }
 
+export async function deleteSeedrTask(taskId: string | number): Promise<any> {
+  return seedrRequest(`/tasks/${encodeURIComponent(String(taskId))}`, 'DELETE');
+}
+
 export async function pauseSeedrTask(taskId: string | number): Promise<any> {
   return seedrRequest(`/tasks/${encodeURIComponent(String(taskId))}/pause`, 'POST');
 }
