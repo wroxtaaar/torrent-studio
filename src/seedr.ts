@@ -219,45 +219,38 @@ function findQuotaValues(value: any, depth = 0): { maxSpace: number; usedSpace: 
 }
 
 export async function getSeedrQuota(): Promise<SeedrQuota> {
-  const livePaths = [
-    async () => seedrRequest('/me/quota'),
-    async () => seedrRequest('/fs/root/contents'),
-    async () => seedrRequest('/fs/root/contents'),
-    async () => seedrRequest('/fs/root'),
-    async () => seedrRequest('/fs/path?path=%2F&contents=true')
-  ];
+  // /me/quota and the /fs/root* endpoints are not available on this
+  // free-tier account. The documented /user endpoint is available and
+  // returns the account storage values directly.
+  const result = unwrapData(await seedrRequest('/user'));
+  const storage = result?.account?.storage ?? result?.storage ?? {};
 
-  let lastError: unknown = null;
+  const maxSpace = Number(
+    storage?.limit ??
+    storage?.max_space ??
+    storage?.maxSpace ??
+    result?.max_space ??
+    result?.space_max ??
+    0
+  );
+  const usedSpace = Number(
+    storage?.used ??
+    storage?.used_space ??
+    storage?.usedSpace ??
+    result?.used_space ??
+    result?.space_used ??
+    0
+  );
 
-  for (const getData of livePaths) {
-    try {
-      const result = await getData();
-      const quota = findQuotaValues(result);
-      if (quota) {
-        return {
-          maxSpace: quota.maxSpace,
-          usedSpace: quota.usedSpace,
-          remainingSpace: Math.max(0, quota.maxSpace - quota.usedSpace),
-        };
-      }
-
-      const data = unwrapData(result);
-      const maxSpace = Number(data?.space_max ?? data?.max_space ?? 0);
-      const usedSpace = Number(data?.space_used ?? data?.used_space ?? 0);
-      if (maxSpace > 0 && usedSpace >= 0 && usedSpace <= maxSpace) {
-        return {
-          maxSpace,
-          usedSpace,
-          remainingSpace: Math.max(0, maxSpace - usedSpace),
-        };
-      }
-    } catch (error) {
-      lastError = error;
-    }
+  if (!(maxSpace > 0) || usedSpace < 0 || usedSpace > maxSpace) {
+    throw new Error('Seedr quota information is temporarily unavailable');
   }
 
-  if (lastError instanceof Error) throw lastError;
-  throw new Error('Seedr quota information is temporarily unavailable');
+  return {
+    maxSpace,
+    usedSpace,
+    remainingSpace: Math.max(0, maxSpace - usedSpace),
+  };
 }
 
 export async function addSeedrTask(magnet: string): Promise<any> {
@@ -294,27 +287,6 @@ export async function findSeedrTaskByHash(infoHash: string): Promise<any | null>
 }
 
 async function getFolderContents(folderId: string | number): Promise<any> {
-  if (String(folderId) === '0') {
-    const rootPaths = [
-      '/fs/root/contents',
-      '/fs/root',
-      '/fs/path?path=%2F&contents=true'
-    ];
-
-    let lastError: unknown = null;
-    for (const path of rootPaths) {
-      try {
-        return await seedrRequest(path);
-      } catch (error) {
-        lastError = error;
-      }
-    }
-
-    throw lastError instanceof Error
-      ? lastError
-      : new Error('Unable to read the Seedr root library');
-  }
-
   return seedrRequest(`/fs/folder/${encodeURIComponent(String(folderId))}/contents`);
 }
 
@@ -533,8 +505,101 @@ export type SeedrLibraryFile = {
   folderPath: string;
 };
 
+const SEEDR_FOLDER_PATH_CACHE_TTL_MS = 10 * 60 * 1000;
+const seedrFolderPathCache = new Map<string, { path: string; expiresAt: number }>();
+
+async function getSeedrFolderPath(folderId: string): Promise<string> {
+  const cached = seedrFolderPathCache.get(folderId);
+  if (cached && cached.expiresAt > Date.now()) return cached.path;
+
+  try {
+    const result = unwrapData(await seedrRequest(`/fs/folder/${encodeURIComponent(folderId)}`));
+    const path = String(result?.path ?? '').trim();
+
+    if (path) {
+      seedrFolderPathCache.set(folderId, {
+        path,
+        expiresAt: Date.now() + SEEDR_FOLDER_PATH_CACHE_TTL_MS,
+      });
+      return path;
+    }
+  } catch {
+    // Folder metadata is supplementary. The file index is still usable
+    // when a free-tier request is rate-limited or otherwise unavailable.
+  }
+
+  return `/Seedr Folder ${folderId}`;
+}
+
+async function mapWithConcurrency<T, R>(
+  values: T[],
+  concurrency: number,
+  mapper: (value: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= values.length) return;
+      results[index] = await mapper(values[index]);
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(Math.max(1, concurrency), values.length || 1) },
+    () => worker()
+  );
+
+  await Promise.all(workers);
+  return results;
+}
+
 export async function listSeedrLibrary(): Promise<SeedrLibraryFile[]> {
-  return collectSeedrFiles('0', '/');
+  // The free-tier account exposes the complete library through /search/fs,
+  // while /fs/root and /fs/root/contents return 404. Use the search index as
+  // the authoritative library listing instead of probing unavailable roots.
+  const result = unwrapData(await seedrRequest('/search/fs?query='));
+  const rawFiles = Array.isArray(result?.files) ? result.files : [];
+
+  if (!rawFiles.length) return [];
+
+  const counts = new Map<string, number>();
+  for (const file of rawFiles) {
+    const folderId = numericId(file?.folder_id ?? file?.folderId);
+    if (folderId) counts.set(folderId, (counts.get(folderId) || 0) + 1);
+  }
+
+  // Only resolve paths for multi-file folders. Single-file entries are shown
+  // directly by the UI, so spending an API request to resolve their folder
+  // path is unnecessary. Limit concurrency because free accounts have lower
+  // API rate limits.
+  const multiFileFolderIds = [...counts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([folderId]) => folderId);
+
+  const folderPaths = new Map<string, string>();
+  const resolvedPaths = await mapWithConcurrency(
+    multiFileFolderIds,
+    4,
+    async folderId => [folderId, await getSeedrFolderPath(folderId)] as const
+  );
+
+  for (const [folderId, path] of resolvedPaths) {
+    folderPaths.set(folderId, path);
+  }
+
+  return rawFiles.map(file => {
+    const folderId = numericId(file?.folder_id ?? file?.folderId);
+    return {
+      id: numericId(file?.id ?? file?.file_id ?? file?.folder_file_id),
+      name: String(file?.name ?? file?.filename ?? ''),
+      size: Number(file?.size ?? file?.length ?? 0),
+      folderId,
+      folderPath: folderPaths.get(folderId) ?? '/',
+    };
+  }).filter(file => Boolean(file.id && file.name));
 }
 
 export async function getSeedrFileDownload(fileId: string | number): Promise<{ url: string; name: string }> {
