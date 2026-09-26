@@ -200,7 +200,15 @@ class QBitClient:
             torrents = await self.json("GET", f"/api/v2/torrents/info?{urlencode({'hash': info_hash})}") or []
             if torrents:
                 torrent = torrents[0]
-                files = await self.torrent_files(info_hash)
+                # qBittorrent can expose the metadata torrent in /torrents/info
+                # a little before /torrents/files is ready. Treat a transient
+                # 404 as "metadata still loading" and keep polling.
+                try:
+                    files = await self.torrent_files(info_hash)
+                except RuntimeError as exc:
+                    if "Not Found" in str(exc):
+                        continue
+                    raise
                 if files:
                     return {
                         "name": torrent.get("name") or "Torrent",
