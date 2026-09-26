@@ -45,7 +45,7 @@ export async function getSeedrQuota(): Promise<SeedrQuota> {
     // Fall through to the live library metadata fallback.
   }
 
-  for (const path of ['/fs/root/contents', '/fs/path?path=%2F&contents=true']) {
+  for (const path of ['/fs/root/contents', '/fs/root', '/fs/path?path=%2F&contents=true']) {
     try {
       const result = await seedrRequest(path);
       const data = unwrapData(result);
@@ -76,9 +76,14 @@ function asArray(value: any, keys: string[] = []): any[] {
   if (Array.isArray(value)) return value;
   for (const key of keys) {
     if (Array.isArray(value?.[key])) return value[key];
+    if (Array.isArray(value?.data?.[key])) return value.data[key];
+    if (Array.isArray(value?.contents?.[key])) return value.contents[key];
+    if (Array.isArray(value?.data?.contents?.[key])) return value.data.contents[key];
   }
   if (Array.isArray(value?.data)) return value.data;
   if (Array.isArray(value?.data?.items)) return value.data.items;
+  if (Array.isArray(value?.contents)) return value.contents;
+  if (Array.isArray(value?.data?.contents)) return value.data.contents;
   return [];
 }
 
@@ -240,13 +245,24 @@ export async function listSeedrTasks(): Promise<any[]> {
 
 async function getFolderContents(folderId: string | number): Promise<any> {
   if (String(folderId) === '0') {
-    try {
-      return await seedrRequest('/fs/root/contents');
-    } catch (error) {
-      // Some Seedr API responses intermittently reject the root shortcut.
-      // The documented path endpoint provides the same root contents.
-      return seedrRequest('/fs/path?path=%2F&contents=true');
+    const rootPaths = [
+      '/fs/root/contents',
+      '/fs/root',
+      '/fs/path?path=%2F&contents=true'
+    ];
+
+    let lastError: unknown = null;
+    for (const path of rootPaths) {
+      try {
+        return await seedrRequest(path);
+      } catch (error) {
+        lastError = error;
+      }
     }
+
+    throw lastError instanceof Error
+      ? lastError
+      : new Error('Unable to read the Seedr root library');
   }
 
   return seedrRequest(`/fs/folder/${encodeURIComponent(String(folderId))}/contents`);
