@@ -197,6 +197,12 @@ export default function App() {
     }
   }, [selectedSeedrFolderId, seedrFolderGroups]);
 
+  // File Explorer State
+  const [currentFolder, setCurrentFolder] = useState<string>('/');
+  const [fileSearch, setFileSearch] = useState<string>('');
+  const [fileTypeFilter, setFileTypeFilter] = useState<string>('all');
+  const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
+
   // While a torrent is downloading, show its physical files only inside
   // the temporary torrent folder UI below. qBittorrent creates destination
   // files immediately, so showing them in the normal file list would make an
@@ -234,12 +240,6 @@ export default function App() {
       return !belongsToActiveTorrent;
     });
   }, [files, activeTorrentFolders]);
-
-  // File Explorer State
-  const [currentFolder, setCurrentFolder] = useState<string>('/');
-  const [fileSearch, setFileSearch] = useState<string>('');
-  const [fileTypeFilter, setFileTypeFilter] = useState<string>('all');
-  const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
 
   // Modals & Drawers
   const [isAddMagnetOpen, setIsAddMagnetOpen] = useState(false);
