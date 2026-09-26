@@ -446,7 +446,7 @@ export default function App() {
         ? source
         : infoHash
           ? `magnet:?xt=urn:btih:${infoHash.trim()}`
-          : source;
+          : '';
     if (seedrDownloadActive) {
       setSeedrAddBlockedNotice(
         'A Seedr download is already in progress. Free Seedr accounts allow one parallel download. Wait for it to finish before adding another magnet link.'
@@ -458,8 +458,10 @@ export default function App() {
 
     // Search results already provide the torrent size. If the whole torrent
     // fits in the currently available Seedr quota, send it straight to
-    // Seedr without opening the qBittorrent metadata/file-selection flow.
-    if (size > 0) {
+    // Seedr only when we have a real magnet/info-hash. Some indexers expose
+    // only a .torrent/download URL; those must go through qBittorrent first
+    // so the hash can be discovered before handing the torrent to Seedr.
+    if (size > 0 && seedrSource) {
       try {
         const quota = await api.getSeedrQuota();
         if (quota.configured && size < quota.remainingSpace) {
