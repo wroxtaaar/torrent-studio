@@ -32,6 +32,7 @@ const LOGS_FILE = path.join(META_DIR, 'logs.json');
 const NOTIFICATIONS_FILE = path.join(META_DIR, 'notifications.json');
 const CLEANUP_FILE = path.join(META_DIR, 'cleanup.json');
 const TORRENT_SEARCH_GRABS_FILE = path.join(META_DIR, 'torrent-search-grabs.json');
+const SEARCH_CACHE_FILE = path.join(META_DIR, 'torrent-search-cache.json');
 const RECENT_SEARCHES_FILE = path.join(META_DIR, 'recent-searches.json');
 
 for (const dir of [STORAGE_DIR, DOWNLOADS_DIR, META_DIR, STREAM_CACHE_DIR, HLS_CACHE_DIR]) fs.mkdirSync(dir, { recursive: true });
@@ -60,7 +61,31 @@ function persistTorrentSearchGrabs() {
   for (const [token, grab] of torrentSearchGrabs) values[token] = grab;
   writeJson(TORRENT_SEARCH_GRABS_FILE, values);
 }
-const torrentSearchCache = new Map<string, { createdAt: number; results: any[] }>();
+type TorrentSearchCacheEntry = { createdAt: number; results: any[] };
+const torrentSearchCache = new Map<string, TorrentSearchCacheEntry>(
+  Object.entries(readJson<Record<string, TorrentSearchCacheEntry>>(SEARCH_CACHE_FILE, {}))
+);
+const TORRENT_SEARCH_CACHE_TTL_MS = 30 * 60 * 1000;
+const MAX_TORRENT_SEARCH_CACHE_ENTRIES = 100;
+
+function persistTorrentSearchCache() {
+  const values: Record<string, TorrentSearchCacheEntry> = {};
+  for (const [key, entry] of torrentSearchCache) values[key] = entry;
+  writeJson(SEARCH_CACHE_FILE, values);
+}
+
+function purgeExpiredTorrentSearchCache() {
+  const now = Date.now();
+  let changed = false;
+  for (const [key, entry] of torrentSearchCache) {
+    if (now - entry.createdAt >= TORRENT_SEARCH_CACHE_TTL_MS) {
+      torrentSearchCache.delete(key);
+      changed = true;
+    }
+  }
+  if (changed) persistTorrentSearchCache();
+}
+
 let recentSearches: string[] = readJson<string[]>(RECENT_SEARCHES_FILE, [])
   .filter(value => typeof value === 'string')
   .slice(0, 10);
@@ -375,7 +400,7 @@ async function qbtJson(pathname: string, init: RequestInit = {}) {
   try { return text ? JSON.parse(text) : null; } catch { return text; }
 }
 
-async function searchTorrentIndexer(query: string, limit = 50, offset = 0) {
+async function searchTorrentIndexer(query: string, limit = 10, offset = 0) {
   if (!prowlarrApiKey) {
     throw Object.assign(
       new Error('Torrent search is not configured. Set PROWLARR_API_KEY in .env.'),
@@ -386,7 +411,7 @@ async function searchTorrentIndexer(query: string, limit = 50, offset = 0) {
   const url = new URL('/api/v1/search', prowlarrBase);
   url.searchParams.set('query', query);
   url.searchParams.set('type', 'search');
-  url.searchParams.set('limit', String(Math.min(Math.max(limit, 1), 100)));
+  url.searchParams.set('limit', String(Math.min(Math.max(limit, 1), 10)));
   url.searchParams.set('offset', String(Math.max(offset, 0)));
 
   const controller = new AbortController();
@@ -481,7 +506,7 @@ async function refreshTorrentSearchGrab(grab: TorrentSearchGrab): Promise<boolea
   const url = new URL('/api/v1/search', prowlarrBase);
   url.searchParams.set('query', grab.query);
   url.searchParams.set('type', 'search');
-  url.searchParams.set('limit', '100');
+  url.searchParams.set('limit', '10');
   url.searchParams.set('offset', '0');
 
   const controller = new AbortController();
@@ -1156,34 +1181,35 @@ async function main() {
   app.get('/api/search/torrents', async (req,res)=>{
     try {
       const query = String(req.query.q || '').trim();
-      const limit = Number(req.query.limit || 50);
-      const offset = Number(req.query.offset || 0);
+      const limit = 10;
+      const offset = 0;
 
       if (query.length < 2) {
         return res.status(400).json({ error: 'Search query must be at least 2 characters.' });
       }
 
       purgeExpiredTorrentSearchGrabs();
+      purgeExpiredTorrentSearchCache();
 
-      const cacheKey = query.toLowerCase() + '|' + Math.min(Math.max(limit, 1), 100) + '|' + Math.max(offset, 0);
+      const cacheKey = query.toLowerCase();
       const cached = torrentSearchCache.get(cacheKey);
-      // Only cache successful searches. A temporary indexer/Cloudflare failure
-      // must not turn into a stale "0 results" response for the next 10 minutes.
-      if (cached && cached.results.length > 0 && Date.now() - cached.createdAt < 10 * 60 * 1000) {
-        return res.json({ results: cached.results, cached: true });
+      if (cached && cached.results.length > 0 && Date.now() - cached.createdAt < TORRENT_SEARCH_CACHE_TTL_MS) {
+        return res.json({ results: cached.results.slice(0, 10), cached: true });
       }
 
-      const results = await searchTorrentIndexer(query, limit, offset);
+      const results = (await searchTorrentIndexer(query, 10, 0)).slice(0, 10);
       if (results.length > 0) {
         torrentSearchCache.set(cacheKey, { createdAt: Date.now(), results });
+        while (torrentSearchCache.size > MAX_TORRENT_SEARCH_CACHE_ENTRIES) {
+          const oldest = [...torrentSearchCache.entries()]
+            .sort((a, b) => a[1].createdAt - b[1].createdAt)[0];
+          if (!oldest) break;
+          torrentSearchCache.delete(oldest[0]);
+        }
+        persistTorrentSearchCache();
       } else {
         torrentSearchCache.delete(cacheKey);
-      }
-
-      if (torrentSearchCache.size > 50) {
-        const oldest = [...torrentSearchCache.entries()]
-          .sort((a, b) => a[1].createdAt - b[1].createdAt)[0];
-        if (oldest) torrentSearchCache.delete(oldest[0]);
+        persistTorrentSearchCache();
       }
 
       return res.json({ results, cached: false });
