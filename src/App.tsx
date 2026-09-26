@@ -104,6 +104,39 @@ export default function App() {
   const [seedrError, setSeedrError] = useState<string | null>(null);
   const [selectedSeedrFolderId, setSelectedSeedrFolderId] = useState<string | null>(null);
 
+  const seedrFolderGroups = useMemo(() => {
+    const groups = new Map<string, {
+      folderId: string;
+      name: string;
+      path: string;
+      files: typeof seedrFiles;
+      totalSize: number;
+    }>();
+
+    for (const file of seedrFiles) {
+      const folderId = file.folderId || '__root__';
+      const path = file.folderPath || '/';
+      const parts = path.split('/').filter(Boolean);
+      const name = parts[parts.length - 1] || 'Root Files';
+      const existing = groups.get(folderId);
+
+      if (existing) {
+        existing.files.push(file);
+        existing.totalSize += file.size;
+      } else {
+        groups.set(folderId, {
+          folderId,
+          name,
+          path,
+          files: [file],
+          totalSize: file.size
+        });
+      }
+    }
+
+    return Array.from(groups.values());
+  }, [seedrFiles]);
+
   // File Explorer State
   const [currentFolder, setCurrentFolder] = useState<string>('/');
   const [fileSearch, setFileSearch] = useState<string>('');
@@ -545,13 +578,30 @@ export default function App() {
 
   const handleDeleteSeedrFile = async (file: { id: string; name: string; size: number; folderId: string; folderPath: string }) => {
     const confirmed = window.confirm(
-      `Delete the Seedr folder containing "${file.name}"? This permanently removes the entire downloaded folder and its contents from Seedr.`
+      `Delete "${file.name}" from Seedr? Only this individual file will be removed.`
     );
     if (!confirmed) return;
 
     try {
-      await api.deleteSeedrFolder(file.folderId);
-      setSeedrFiles(prev => prev.filter(item => item.folderId !== file.folderId));
+      await api.deleteSeedrFile(file.id);
+      setSeedrFiles(prev => prev.filter(item => item.id !== file.id));
+      setSeedrError(null);
+    } catch (error) {
+      console.error('Failed to delete Seedr file:', error);
+      setSeedrError(error instanceof Error ? error.message : 'Failed to delete Seedr file');
+    }
+  };
+
+  const handleDeleteSeedrFolder = async (folderId: string, folderName: string) => {
+    const confirmed = window.confirm(
+      `Delete the entire Seedr folder "${folderName}" and all of its files? This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await api.deleteSeedrFolder(folderId);
+      setSeedrFiles(prev => prev.filter(item => item.folderId !== folderId));
+      setSelectedSeedrFolderId(prev => prev === folderId ? null : prev);
       setSeedrError(null);
     } catch (error) {
       console.error('Failed to delete Seedr folder:', error);
@@ -897,7 +947,7 @@ export default function App() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="font-bold">
-                      {seedrNotice.status === 'completed' ? 'Seedr download completed' : 'Downloading with Seedr'}
+                      {seedrNotice.status === 'completed' ? 'File downloaded' : 'Downloading with Seedr'}
                     </div>
                     <div className="text-emerald-400/80 mt-0.5 truncate">{seedrNotice.name}</div>
                     {seedrNotice.status !== 'completed' && (
@@ -942,11 +992,6 @@ export default function App() {
                   </div>
                 )}
 
-                {seedrNotice.status === 'completed' && seedrNotice.files.length === 0 && (
-                  <div className="text-amber-300/80 pt-2 border-t border-emerald-500/15">
-                    Seedr reports the download as complete, but no files were returned yet.
-                  </div>
-                )}
               </div>
             )}
             {/* Action header */}
@@ -1093,7 +1138,7 @@ export default function App() {
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => handleDeleteSeedrFile(folder.files[0])}
+                                  onClick={() => handleDeleteSeedrFolder(folder.folderId, folder.name)}
                                   className="p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200 transition"
                                   title="Delete Seedr folder"
                                 >
@@ -1159,6 +1204,14 @@ export default function App() {
                                     className="px-2.5 py-1.5 rounded-lg bg-emerald-400 text-slate-950 font-bold text-xs hover:bg-emerald-300 transition"
                                   >
                                     Download
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteSeedrFile(file)}
+                                    className="p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200 transition"
+                                    title="Delete this file"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
                                   </button>
                                 </div>
                               </div>
