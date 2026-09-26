@@ -188,7 +188,13 @@ export async function listSeedrTasks(): Promise<any[]> {
 
 async function getFolderContents(folderId: string | number): Promise<any> {
   if (String(folderId) === '0') {
-    return seedrRequest('/fs/root/contents');
+    try {
+      return await seedrRequest('/fs/root/contents');
+    } catch (error) {
+      // Some Seedr API responses intermittently reject the root shortcut.
+      // The documented path endpoint provides the same root contents.
+      return seedrRequest('/fs/path?path=%2F&contents=true');
+    }
   }
 
   return seedrRequest(`/fs/folder/${encodeURIComponent(String(folderId))}/contents`);
