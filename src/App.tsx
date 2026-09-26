@@ -160,6 +160,12 @@ export default function App() {
       .map(group => group.files[0]);
   }, [seedrFolderGroups]);
 
+  useEffect(() => {
+    if (selectedSeedrFolderId !== null && !seedrFolderGroups.some(folder => folder.folderId === selectedSeedrFolderId)) {
+      setSelectedSeedrFolderId(null);
+    }
+  }, [selectedSeedrFolderId, seedrFolderGroups]);
+
   // Hide physical qBittorrent files from the cloud-file browser until their
   // corresponding torrent file is actually complete. qBittorrent creates the
   // destination file as soon as downloading starts, so scanning /downloads
