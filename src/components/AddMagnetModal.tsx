@@ -146,10 +146,8 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     }
   };
 
-  // Resolve torrent metadata without creating a qBittorrent torrent.
-  // Direct magnets use WebTorrent/ut_metadata and Seedr quota is checked in
-  // parallel so the fast path can go straight to Seedr when the whole torrent
-  // fits.
+  // Add the torrent paused first, then poll qBittorrent's real file list.
+  // This avoids relying on fetchMetadata returning a complete descriptor.
   const triggerInspect = async (link: string) => {
     const source = link.trim();
     if (!source) {
@@ -158,106 +156,38 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       return;
     }
 
-    const directSource =
-      /^magnet:\?/i.test(source) ||
-      /^[a-f0-9]{40}$/i.test(source);
-
-    const metadataSource =
-      /^[a-f0-9]{40}$/i.test(source)
-        ? `magnet:?xt=urn:btih:${source.toLowerCase()}`
-        : source;
-
     try {
       setIsInspecting(true);
       setBackgroundMode(true);
       setError('');
       setInspectedFiles([]);
-      setInspectionSource(
-        directSource
-          ? 'Fetching torrent metadata without downloading...'
-          : 'Adding torrent paused and waiting for qBittorrent metadata...'
-      );
+       setInspectionSource(
+         isSearchGrab
+           ? 'Loading torrent metadata...'
+           : 'Adding torrent paused and waiting for qBittorrent metadata...'
+       );
 
-      let data: any;
-      let quota: any = null;
-
-      if (directSource) {
-        [data, quota] = await Promise.all([
-          api.getTorrentMetadata(metadataSource),
-          api.getSeedrQuota(),
-        ]);
-      } else {
-        data = await api.inspectMagnet(source, category);
-      }
+      const data = await api.inspectMagnet(source, category);
 
       if (data && Array.isArray(data.files) && data.files.length > 0) {
-        const hash = String(data.infoHash || data.hash || '').trim().toLowerCase();
+        const hash = String(data.hash || '').trim().toLowerCase();
         setInspectedHash(hash);
-        if (metadataSource !== source) setMagnetInput(metadataSource);
+         const resolvedSource =
+           data.source === 'search_torrent_descriptor' && hash
+             ? `magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(data.name || data.files[0]?.name || 'torrent')}`
+             : source;
 
+         if (resolvedSource !== source) {
+           setMagnetInput(resolvedSource);
+         }
         applyFileList(data.files);
 
-        if (directSource) {
-          if (!quota?.configured) {
-            throw new Error('Seedr is not configured, so available storage could not be checked.');
-          }
-
-          const totalSize = Number(
-            data.totalSize ||
-            data.files.reduce((sum: number, file: any) => sum + Number(file.size || 0), 0)
-          );
-          const remainingSpace = Number(quota.remainingSpace || 0);
-
-          if (totalSize <= remainingSpace) {
-            const manifest = data.files.map((file: any) => ({
-              name: String(file.name || ''),
-              size: Number(file.size || 0),
-              priority: 1,
-            }));
-
-            setInspectionSource(
-              `✓ ${formatBytes(totalSize)} fits within Seedr's ${formatBytes(remainingSpace)} remaining — sending directly to Seedr...`
-            );
-
-            await onAdd(
-              metadataSource,
-              category,
-              data.files.map((file: any) => Number(file.index)),
-              manifest,
-              hash || undefined,
-              'seedr',
-              data.files.map((file: any) => String(file.name || ''))
-            );
-
-            setBackgroundMode(false);
-            onClose();
-            return;
-          }
-
-          if (data.files.length === 1) {
-            setInspectionSource(
-              `Torrent is ${formatBytes(totalSize)}, but Seedr has only ${formatBytes(remainingSpace)} remaining.`
-            );
-            setError('This single-file torrent is larger than your remaining Seedr storage.');
-            return;
-          }
-
-          setInspectionSource(
-            `Torrent is ${formatBytes(totalSize)} and Seedr has ${formatBytes(remainingSpace)} remaining. Select the files you want; Seedr will not receive the magnet until you confirm.`
-          );
-          return;
-        }
-
         if (data.files.length === 1) {
-          await startSingleFileDownload(source, data.files, hash);
+           await startSingleFileDownload(resolvedSource, data.files, hash);
           return;
         }
 
-        setInspectionSource(
-          isSearchGrab
-            ? '✓ Torrent metadata loaded • Multi-file torrent stays paused while you choose files'
-            : '✓ qBittorrent metadata loaded • Multi-file torrent stays paused while you choose files'
-        );
+         setInspectionSource(isSearchGrab ? '✓ Torrent metadata loaded • Multi-file torrent stays paused while you choose files' : '✓ qBittorrent metadata loaded • Multi-file torrent stays paused while you choose files');
         return;
       }
 
@@ -265,12 +195,8 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       if (!hash) {
         throw new Error(
           data?.message ||
-          'Torrent metadata could not be resolved. Please verify the magnet URI and try again.'
+          'qBittorrent did not return a torrent hash. Please verify the magnet URI and try again.'
         );
-      }
-
-      if (directSource) {
-        throw new Error('Metadata resolver did not return a file list.');
       }
 
       if (!data?.pending && data?.source !== 'qbt_torrent_pending') {
@@ -319,7 +245,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       console.warn('Inspect magnet error:', err);
       setInspectedFiles([]);
       setInspectionSource('');
-      setError(err?.message || 'Could not load torrent metadata.');
+      setError(err?.message || 'Could not load torrent metadata from qBittorrent.');
     } finally {
       setIsInspecting(false);
     }
