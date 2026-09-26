@@ -143,6 +143,7 @@ export default function App() {
   const [seedrError, setSeedrError] = useState<string | null>(null);
   const [seedrDeleteNotice, setSeedrDeleteNotice] = useState<string | null>(null);
   const [seedrAddBlockedNotice, setSeedrAddBlockedNotice] = useState<string | null>(null);
+  const [isCancellingSeedr, setIsCancellingSeedr] = useState(false);
   const [selectedSeedrFolderId, setSelectedSeedrFolderId] = useState<string | null>(() => {
     try {
       return window.localStorage.getItem('seedflow_seedr_folder') || null;
@@ -664,11 +665,11 @@ export default function App() {
 
   const handleCancelSeedrDownload = async () => {
     const taskId = seedrNotice?.taskId;
-    if (taskId == null) return;
+    if (taskId == null || isCancellingSeedr) return;
 
     const currentNotice = seedrNotice;
     try {
-      setIsLoading(true);
+      setIsCancellingSeedr(true);
       await api.deleteSeedrTask(taskId);
       setSeedrNotice(null);
     } catch (error: any) {
@@ -679,7 +680,7 @@ export default function App() {
       );
       window.setTimeout(() => setSeedrAddBlockedNotice(null), 5000);
     } finally {
-      setIsLoading(false);
+      setIsCancellingSeedr(false);
     }
   };
 
@@ -1393,11 +1394,11 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => void handleCancelSeedrDownload()}
-                      disabled={isLoading || seedrNotice.taskId == null}
+                      disabled={isCancellingSeedr || seedrNotice.taskId == null}
                       className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/25 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200 disabled:opacity-40 disabled:cursor-not-allowed text-[10px] font-bold transition"
                       title="Cancel Seedr download"
                     >
-                      {isLoading ? 'Cancelling…' : 'Cancel'}
+                      {isCancellingSeedr ? 'Cancelling…' : 'Cancel'}
                     </button>
                   </div>
                 </div>
