@@ -17,6 +17,122 @@ export function canUseSeedr(totalSize: number): boolean {
     totalSize <= SEEDR_MAX_SIZE_BYTES;
 }
 
+async function seedrRequest(
+  path: string,
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
+  body?: unknown
+): Promise<any> {
+  const token = getToken();
+  if (!token) throw new Error('Seedr API token is not configured');
+
+  const response = await fetch(new URL(path, SEEDR_API_BASE), {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+    },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+
+  const text = await response.text();
+  let data: any = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+
+  if (!response.ok) {
+    const error = new Error(
+      String(data?.error?.message ?? data?.error ?? data?.message ?? text ?? `Seedr API request failed (${response.status})`)
+    );
+    (error as any).status = response.status;
+    throw error;
+  }
+
+  return data;
+}
+
+function unwrapData(value: any): any {
+  if (value && typeof value === 'object' && value.data !== undefined) return value.data;
+  return value;
+}
+
+function asArray(value: any, keys: string[] = []): any[] {
+  if (Array.isArray(value)) return value;
+  const data = unwrapData(value);
+  if (Array.isArray(data)) return data;
+  for (const key of keys) {
+    if (Array.isArray(data?.[key])) return data[key];
+    if (Array.isArray(data?.data?.[key])) return data.data[key];
+    if (Array.isArray(data?.contents?.[key])) return data.contents[key];
+    if (Array.isArray(data?.data?.contents?.[key])) return data.data.contents[key];
+  }
+  if (Array.isArray(data?.data)) return data.data;
+  if (Array.isArray(data?.data?.items)) return data.data.items;
+  if (Array.isArray(data?.contents)) return data.contents;
+  if (Array.isArray(data?.data?.contents)) return data.data.contents;
+  return [];
+}
+
+function numericId(value: any): string {
+  return String(value ?? '');
+}
+
+function normalizeFile(file: any, folderId = ''): any {
+  return {
+    id: numericId(file?.id ?? file?.file_id ?? file?.folder_file_id),
+    name: String(file?.name ?? file?.filename ?? ''),
+    size: Number(file?.size ?? file?.length ?? 0),
+    folderId: numericId(file?.folder_id ?? file?.folderId ?? folderId),
+  };
+}
+
+function normalizeFolder(folder: any): any {
+  return {
+    id: numericId(folder?.id ?? folder?.folder_id),
+    name: String(folder?.name ?? folder?.title ?? 'Folder'),
+  };
+}
+
+function extractFiles(payload: any, folderId = ''): any[] {
+  const data = unwrapData(payload);
+  return asArray(data, ['files', 'items']).map(file => normalizeFile(file, folderId));
+}
+
+function extractFolders(payload: any): any[] {
+  const data = unwrapData(payload);
+  return asArray(data, ['folders', 'directories']).map(normalizeFolder);
+}
+
+function normalizeTaskPayload(task: any): any {
+  const data = unwrapData(task);
+  return data?.task ?? data;
+}
+
+function taskProgress(task: any): number {
+  const value = Number(task?.progress ?? task?.task?.progress ?? task?.torrent?.progress ?? 0);
+  return Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0;
+}
+
+function taskIsComplete(task: any): boolean {
+  const state = String(task?.state ?? task?.status ?? task?.task?.state ?? task?.task?.status ?? '').toLowerCase();
+  return state === 'finished' || state === 'completed' || state === 'complete' || taskProgress(task) >= 100;
+}
+
+function getStatus(error: unknown): number {
+  return Number((error as any)?.status || 0);
+}
+
+async function getTask(taskId: string | number): Promise<any> {
+  return seedrRequest(`/tasks/${encodeURIComponent(String(taskId))}`);
+}
+
+async function getTaskContents(taskId: string | number): Promise<any> {
+  return seedrRequest(`/tasks/${encodeURIComponent(String(taskId))}/contents`);
+}
+
+async function getTaskProgress(taskId: string | number): Promise<any> {
+  return seedrRequest(`/tasks/${encodeURIComponent(String(taskId))}/progress`);
+}
+
 export type SeedrQuota = {
   maxSpace: number;
   usedSpace: number;
