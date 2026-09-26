@@ -156,12 +156,13 @@ export const api = {
     category = 'Downloads',
     selectedFiles?: number[],
     manifest?: { name: string; size: number; priority: number }[],
-    existingHash?: string
+    existingHash?: string,
+    forceBackend?: 'seedr' | 'qbittorrent'
   ): Promise<{ backend?: 'seedr' | 'qbittorrent'; seedrTaskId?: number | null }> {
     const res = await fetch('/api/v2/torrents/add', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ urls, category, selectedFiles, manifest, existingHash })
+      body: JSON.stringify({ urls, category, selectedFiles, manifest, existingHash, forceBackend })
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
@@ -177,6 +178,25 @@ export const api = {
     return await res.json().catch(() => ({ backend: 'qbittorrent' }));
   },
 
+
+  async getSeedrQuota(): Promise<{
+    configured: boolean;
+    maxSpace: number;
+    usedSpace: number;
+    remainingSpace: number;
+  }> {
+    const res = await fetch('/api/seedr/quota');
+    const body = await res.text();
+    let data: any = null;
+    try { data = body ? JSON.parse(body) : null; } catch { data = null; }
+    if (!res.ok) throw new Error(data?.error || body || 'Failed to fetch Seedr quota');
+    return {
+      configured: Boolean(data?.configured),
+      maxSpace: Number(data?.maxSpace || 0),
+      usedSpace: Number(data?.usedSpace || 0),
+      remainingSpace: Number(data?.remainingSpace || 0),
+    };
+  },
 
   async getSeedrFiles(): Promise<{
     configured: boolean;
