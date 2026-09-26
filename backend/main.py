@@ -432,12 +432,24 @@ async def torrents_add(body: dict[str, Any]):
                 pass
 
         if seedr_task_id:
+            selection_applied = False
+            selection_error = None
+            if manifest:
+                try:
+                    # Apply the same file ordering used by the selector UI to
+                    # the already-created Seedr task.
+                    await _seedr_set_unwanted(seedr_task_id, len(manifest), selected_ids)
+                    selection_applied = True
+                except Exception as exc:
+                    selection_error = str(exc)
+
             return {
                 "backend": "seedr",
                 "seedrTaskId": int(seedr_task_id) if seedr_task_id.isdigit() else seedr_task_id,
                 "seedrResponse": {"user_torrent_id": seedr_task_id, "success": True, "reused": True},
                 "existingHash": existing_hash or None,
-                "selectionApplied": False,
+                "selectionApplied": selection_applied,
+                "selectionError": selection_error,
             }
 
         seedr_result = _seedr_data(await seedr_request("/tasks", "POST", {
@@ -456,12 +468,22 @@ async def torrents_add(body: dict[str, Any]):
         if not task_id:
             raise HTTPException(502, "Seedr did not return a task id")
 
+        selection_applied = False
+        selection_error = None
+        if manifest:
+            try:
+                await _seedr_set_unwanted(task_id, len(manifest), selected_ids)
+                selection_applied = True
+            except Exception as exc:
+                selection_error = str(exc)
+
         return {
             "backend": "seedr",
             "seedrTaskId": int(task_id) if task_id.isdigit() else task_id,
             "seedrResponse": seedr_result,
             "existingHash": existing_hash or None,
-            "selectionApplied": False,
+            "selectionApplied": selection_applied,
+            "selectionError": selection_error,
         }
 
     # Magnet inspection creates a stopped metadata-only torrent. Reuse that
