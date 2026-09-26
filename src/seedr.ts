@@ -23,212 +23,52 @@ export type SeedrQuota = {
   remainingSpace: number;
 };
 
-export async function getSeedrQuota(): Promise<SeedrQuota> {
-  // /me/quota is the documented quota endpoint, but Seedr's current API
-  // has returned stale/incomplete storage values there for some accounts.
-  // Library/search responses also expose the live max_space/used_space values,
-  // so use those as a fallback before declaring the account full.
-  try {
-    const result = await seedrRequest('/me/quota');
-    const data = unwrapData(result);
-    const maxSpace = Number(data?.max_space ?? data?.maxSpace ?? data?.storage?.max ?? data?.quota?.max_space ?? 0);
-    const usedSpace = Number(data?.used_space ?? data?.usedSpace ?? data?.storage?.used ?? data?.quota?.used_space ?? 0);
+function findQuotaValues(value: any, depth = 0): { maxSpace: number; usedSpace: number } | null {
+  if (!value || depth > 6 || typeof value !== 'object') return null;
 
-    if (maxSpace > 0 && usedSpace >= 0 && usedSpace <= maxSpace) {
-      return {
-        maxSpace,
-        usedSpace,
-        remainingSpace: Math.max(0, maxSpace - usedSpace),
-      };
-    }
-  } catch {
-    // Fall through to the live library metadata fallback.
+  const maxSpace = Number(value?.max_space ?? value?.maxSpace ?? value?.storage?.max ?? value?.quota?.max_space ?? 0);
+  const usedSpace = Number(value?.used_space ?? value?.usedSpace ?? value?.storage?.used ?? value?.quota?.used_space ?? 0);
+
+  if (maxSpace > 0 && usedSpace >= 0 && usedSpace <= maxSpace) {
+    return { maxSpace, usedSpace };
   }
 
-  for (const path of ['/fs/root/contents', '/fs/root', '/fs/path?path=%2F&contents=true']) {
+  for (const child of Object.values(value)) {
+    const found = findQuotaValues(child, depth + 1);
+    if (found) return found;
+  }
+
+  return null;
+}
+
+export async function getSeedrQuota(): Promise<SeedrQuota> {
+  const paths = [
+    '/me/quota',
+    '/fs/root/contents',
+    '/fs/root',
+    '/fs/path?path=%2F&contents=true'
+  ];
+
+  let lastError: unknown = null;
+
+  for (const path of paths) {
     try {
       const result = await seedrRequest(path);
-      const data = unwrapData(result);
-      const maxSpace = Number(data?.max_space ?? data?.maxSpace ?? 0);
-      const usedSpace = Number(data?.used_space ?? data?.usedSpace ?? 0);
-
-      if (maxSpace > 0 && usedSpace >= 0 && usedSpace <= maxSpace) {
+      const quota = findQuotaValues(result);
+      if (quota) {
         return {
-          maxSpace,
-          usedSpace,
-          remainingSpace: Math.max(0, maxSpace - usedSpace),
+          maxSpace: quota.maxSpace,
+          usedSpace: quota.usedSpace,
+          remainingSpace: Math.max(0, quota.maxSpace - quota.usedSpace),
         };
       }
-    } catch {
-      // Try the next live Seedr source.
+    } catch (error) {
+      lastError = error;
     }
   }
 
+  if (lastError instanceof Error) throw lastError;
   throw new Error('Seedr quota information is temporarily unavailable');
-}
-
-function getStatus(error: unknown): number | undefined {
-  const status = Number((error as any)?.status);
-  return Number.isFinite(status) && status > 0 ? status : undefined;
-}
-
-function asArray(value: any, keys: string[] = []): any[] {
-  if (Array.isArray(value)) return value;
-  for (const key of keys) {
-    if (Array.isArray(value?.[key])) return value[key];
-    if (Array.isArray(value?.data?.[key])) return value.data[key];
-    if (Array.isArray(value?.contents?.[key])) return value.contents[key];
-    if (Array.isArray(value?.data?.contents?.[key])) return value.data.contents[key];
-  }
-  if (Array.isArray(value?.data)) return value.data;
-  if (Array.isArray(value?.data?.items)) return value.data.items;
-  if (Array.isArray(value?.contents)) return value.contents;
-  if (Array.isArray(value?.data?.contents)) return value.data.contents;
-  return [];
-}
-
-function unwrapData(value: any): any {
-  return value?.data ?? value;
-}
-
-async function seedrRequest(
-  path: string,
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
-  body?: Record<string, unknown>
-): Promise<any> {
-  const token = getToken();
-  if (!token) throw new Error('Seedr API token is not configured');
-
-  const init: RequestInit = {
-    method,
-    headers: {
-      Accept: 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-  };
-
-  if (body !== undefined) {
-    (init.headers as Record<string, string>)['Content-Type'] = 'application/json';
-    init.body = JSON.stringify(body);
-  }
-
-  const response = await fetch(SEEDR_API_BASE + (path.startsWith('/') ? path : '/' + path), init);
-  const text = await response.text();
-
-  let result: any = null;
-  try {
-    result = text ? JSON.parse(text) : null;
-  } catch {
-    result = text;
-  }
-
-  if (!response.ok) {
-    const message =
-      result?.error_description ||
-      result?.error ||
-      result?.message ||
-      text ||
-      response.statusText ||
-      'Seedr API request failed';
-    throw Object.assign(new Error(String(message)), { status: response.status });
-  }
-
-  return result;
-}
-
-function numericId(value: any): string {
-  return String(value ?? '');
-}
-
-function extractTaskId(result: any): string {
-  const data = unwrapData(result);
-  return numericId(
-    data?.id ??
-    data?.task_id ??
-    data?.torrent_id ??
-    data?.user_torrent_id
-  );
-}
-
-function normalizeTaskPayload(value: any): any {
-  const data = unwrapData(value);
-  return data?.task ?? data?.torrent ?? data;
-}
-
-function taskProgress(task: any): number {
-  const normalized = normalizeTaskPayload(task);
-  const raw =
-    normalized?.progress ??
-    task?.percentage ??
-    task?.percent ??
-    task?.pct ??
-    task?.progress_percent ??
-    0;
-
-  const value = Number(String(raw).replace('%', ''));
-  return Number.isFinite(value)
-    ? Math.max(0, Math.min(100, value))
-    : 0;
-}
-
-function taskIsComplete(task: any): boolean {
-  const normalized = normalizeTaskPayload(task);
-  if (!normalized) return false;
-
-  const status = String(
-    normalized?.status ??
-    task?.state ??
-    task?.phase ??
-    task?.download_status ??
-    ''
-  ).toLowerCase();
-
-  return taskProgress(normalized) >= 100 ||
-    ['completed', 'complete', 'finished', 'done', 'success', 'succeeded'].includes(status);
-}
-
-function normalizeFile(file: any, folderId = ''): any {
-  const id = numericId(
-    file?.id ??
-    file?.file_id ??
-    file?.folder_file_id
-  );
-
-  return {
-    id,
-    name: String(file?.name ?? file?.filename ?? ''),
-    size: Number(file?.size ?? file?.length ?? 0),
-    folderId: numericId(file?.folder_id ?? file?.folderId ?? folderId),
-  };
-}
-
-function normalizeFolder(folder: any): { id: string; name: string } {
-  return {
-    id: numericId(folder?.id ?? folder?.folder_id),
-    name: String(folder?.name ?? folder?.title ?? 'Folder'),
-  };
-}
-
-function extractFiles(payload: any, folderId = ''): any[] {
-  const data = unwrapData(payload);
-  return asArray(data, ['files', 'items']).map(file => normalizeFile(file, folderId));
-}
-
-function extractFolders(payload: any): any[] {
-  const data = unwrapData(payload);
-  return asArray(data, ['folders', 'directories']).map(normalizeFolder);
-}
-
-async function getTask(taskId: string | number): Promise<any> {
-  return seedrRequest(`/tasks/${encodeURIComponent(String(taskId))}`);
-}
-
-async function getTaskContents(taskId: string | number): Promise<any> {
-  return seedrRequest(`/tasks/${encodeURIComponent(String(taskId))}/contents`);
-}
-
-async function getTaskProgress(taskId: string | number): Promise<any> {
-  return seedrRequest(`/tasks/${encodeURIComponent(String(taskId))}/progress`);
 }
 
 export async function addSeedrTask(magnet: string): Promise<any> {
