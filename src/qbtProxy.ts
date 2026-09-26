@@ -1,7 +1,7 @@
 import bencode from 'bencode';
 import crypto from 'crypto';
 import type { Express, Request, Response, NextFunction } from 'express';
-import { addSeedrTask, pauseSeedrTask, resumeSeedrTask, getSeedrTaskSelection, deleteSeedrTask, canUseSeedr, getSeedrTaskStatus, findSeedrTaskByHash, getSeedrFileDownload, getSeedrFilePresentation, deleteSeedrFile, deleteSeedrFolder, getSeedrFolderDownload, getSeedrQuota, isSeedrConfigured, listSeedrLibrary, seedrMaxSizeBytes } from './seedr.ts';
+import { addSeedrTask, pauseSeedrTask, resumeSeedrTask, setSeedrUnwanted, getSeedrTaskSelection, deleteSeedrTask, canUseSeedr, getSeedrTaskStatus, findSeedrTaskByHash, getSeedrFileDownload, getSeedrFilePresentation, deleteSeedrFile, deleteSeedrFolder, getSeedrFolderDownload, getSeedrQuota, isSeedrConfigured, listSeedrLibrary, seedrMaxSizeBytes } from './seedr.ts';
 
 type QbtConfig = {
   baseUrl: string;
@@ -1105,7 +1105,11 @@ export function installQbtProxy(app: Express) {
           const selectedNames = Array.isArray(body.selectedNames)
             ? body.selectedNames.map((name: any) => String(name || '').split('/').pop()).filter(Boolean)
             : [];
-          const hasSelection = selectedNames.length > 0;
+          const selectedFileIndexes = Array.isArray(body.selectedFiles)
+            ? body.selectedFiles.map(Number).filter((index: number) => Number.isInteger(index) && index >= 0)
+            : [];
+          const manifestFiles = Array.isArray(body.manifest) ? body.manifest : [];
+          const hasSelection = selectedFileIndexes.length > 0;
 
           if (!seedrTask) {
             seedrTask = await addSeedrTask(directMagnet);
@@ -1114,6 +1118,17 @@ export function installQbtProxy(app: Express) {
           const seedrTaskId = seedrTask?.user_torrent_id ?? seedrTask?.id ?? null;
           if (seedrTaskId == null) {
             throw new Error('Seedr did not return a task ID');
+          }
+
+          // Apply the user's file selection before resuming. The Seedr API
+          // exposes an unwanted-file bitmap; do not resume unless the server
+          // confirms that selection was accepted.
+          if (manifestFiles.length > 1 && hasSelection) {
+            const unwantedIndexes = manifestFiles
+              .map((_file: any, index: number) => index)
+              .filter((index: number) => !selectedFileIndexes.includes(index));
+
+            await setSeedrUnwanted(seedrTaskId, manifestFiles.length, unwantedIndexes);
           }
 
           if (hasSelection) {
