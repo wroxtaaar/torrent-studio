@@ -613,7 +613,7 @@ export default function App() {
     }, 3000);
 
     return () => window.clearTimeout(timeoutId);
-  }, [seedrNotice?.taskId, seedrNotice?.status, loadSeedrLibrary]);
+  }, [seedrNotice?.taskId, seedrNotice?.status]);
 
   useEffect(() => {
     if (!seedrNotice?.taskId || seedrNotice.status === 'completed') return;
@@ -675,7 +675,7 @@ export default function App() {
       active = false;
       if (timeoutId !== null) window.clearTimeout(timeoutId);
     };
-  }, [seedrNotice?.taskId, seedrNotice?.status]);
+  }, [seedrNotice?.taskId, seedrNotice?.status, loadSeedrLibrary]);
 
   const handleCancelSeedrDownload = async () => {
     const taskId = seedrNotice?.taskId;
