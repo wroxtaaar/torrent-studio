@@ -462,7 +462,15 @@ export default function App() {
       if (result.backend === 'seedr') {
         setSeedrNotice({
           taskId: result.seedrTaskId ?? null,
-          name: 'Waiting for torrent metadata…',
+          name: (() => {
+            const response: any = result.seedrResponse;
+            return String(
+              response?.name ??
+              response?.task?.name ??
+              response?.title ??
+              'Waiting for Seedr metadata…'
+            );
+          })(),
           status: 'waiting',
           progress: 0,
           downloadUrl: null,
@@ -549,14 +557,12 @@ export default function App() {
           if (!prev) return null;
           return {
             ...prev,
-            name: prev.metadataReady
-              ? prev.name
-              : String(
-                  (result as any).task?.name ??
-                  (result as any).task?.title ??
-                  (result as any).task?.torrent_name ??
-                  prev.name
-                ),
+            name: String(
+              (result as any).name ??
+              (result as any).task?.name ??
+              (result as any).task?.title ??
+              prev.name
+            ),
             status: completed ? 'completed' : result.status,
             progress: completed ? 100 : progress,
             downloadUrl: result.downloadUrl,
