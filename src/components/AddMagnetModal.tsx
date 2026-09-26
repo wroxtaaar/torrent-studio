@@ -112,6 +112,33 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     setCustomFileCount(files.length);
   };
 
+  const startSingleFileDownload = async (
+    source: string,
+    files: { index: number; name: string; size: number; path?: string; type?: string; priority?: number }[],
+    hash?: string
+  ) => {
+    if (files.length !== 1) return;
+
+    const file = files[0];
+    const manifest = [{
+      name: file.name,
+      size: Number(file.size || 0),
+      priority: 1
+    }];
+
+    try {
+      setIsLoading(true);
+      setError('');
+      await onAdd(source, category, [Number(file.index)], manifest, hash || undefined);
+      setBackgroundMode(false);
+      onClose();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to start cloud torrent download');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Add the torrent paused first, then poll qBittorrent's real file list.
   // This avoids relying on fetchMetadata returning a complete descriptor.
   const triggerInspect = async (link: string) => {
@@ -132,8 +159,15 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       const data = await api.inspectMagnet(source, category);
 
       if (data && Array.isArray(data.files) && data.files.length > 0) {
-        setInspectedHash(String(data.hash || '').trim().toLowerCase());
+        const hash = String(data.hash || '').trim().toLowerCase();
+        setInspectedHash(hash);
         applyFileList(data.files);
+
+        if (data.files.length === 1) {
+          await startSingleFileDownload(source, data.files, hash);
+          return;
+        }
+
         setInspectionSource('✓ qBittorrent file metadata loaded • Torrent remains paused until you select files');
         return;
       }
@@ -155,17 +189,22 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
         try {
           const files = await api.getTorrentFiles(hash);
           if (files.length > 0) {
+            const normalizedFiles = files.map((f) => ({
+              index: f.index,
+              name: f.name,
+              size: f.size,
+              path: f.path,
+              type: classifyFileType(f.name),
+              priority: f.priority
+            }));
             setInspectedHash(hash);
-            applyFileList(
-              files.map((f) => ({
-                index: f.index,
-                name: f.name,
-                size: f.size,
-                path: f.path,
-                type: classifyFileType(f.name),
-                priority: f.priority
-              }))
-            );
+            applyFileList(normalizedFiles);
+
+            if (normalizedFiles.length === 1) {
+              await startSingleFileDownload(source, normalizedFiles, hash);
+              return;
+            }
+
             setInspectionSource('✓ qBittorrent file metadata loaded • Torrent is paused');
             return;
           }
