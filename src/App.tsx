@@ -98,6 +98,10 @@ export default function App() {
   const [qbtSettings, setQbtSettings] = useState<QbtSettings | null>(null);
   const [cleanupSettings, setCleanupSettings] = useState<CleanupSettings | null>(null);
   const [seedrNotice, setSeedrNotice] = useState<{ taskId: number | string | null; name: string; status: 'waiting' | 'downloading' | 'completed'; progress: number; downloadUrl: string | null; files: Array<{ id: string; name: string; size: number; url: string | null }> } | null>(null);
+  const [seedrFiles, setSeedrFiles] = useState<Array<{ id: string; name: string; size: number; folderId: string; folderPath: string }>>([]);
+  const [seedrConfigured, setSeedrConfigured] = useState(false);
+  const [seedrLoading, setSeedrLoading] = useState(false);
+  const [seedrError, setSeedrError] = useState<string | null>(null);
 
   // File Explorer State
   const [currentFolder, setCurrentFolder] = useState<string>('/');
@@ -190,6 +194,26 @@ export default function App() {
   useEffect(() => {
     loadInitialData();
   }, [loadInitialData]);
+
+
+  const loadSeedrLibrary = useCallback(async () => {
+    setSeedrLoading(true);
+    setSeedrError(null);
+    try {
+      const result = await api.getSeedrFiles();
+      setSeedrConfigured(result.configured);
+      setSeedrFiles(result.files);
+    } catch (error: any) {
+      setSeedrError(error?.message || 'Failed to load Seedr files');
+    } finally {
+      setSeedrLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'files') loadSeedrLibrary();
+  }, [activeTab, loadSeedrLibrary]);
+
 
   // Polling loop for active torrents, speeds, and push notifications
   useEffect(() => {
@@ -453,6 +477,17 @@ export default function App() {
     api.getTorrents()
       .then(setTorrents)
       .catch(error => console.error('Failed to refresh torrents after priority update:', error));
+  };
+
+
+  const handleDownloadSeedrFile = async (fileId: string) => {
+    try {
+      const result = await api.getSeedrFileDownload(fileId);
+      window.open(result.url, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      console.error('Failed to create Seedr download link:', error);
+      setSeedrError(error instanceof Error ? error.message : 'Failed to create Seedr download link');
+    }
   };
 
   const handleDeleteFile = (id: string) => {
@@ -891,6 +926,78 @@ export default function App() {
         {/* TAB 2: MY CLOUD FILES */}
         {activeTab === 'files' && (
           <div className="space-y-4">
+            {/* Persistent Seedr Library */}
+            <div className="p-4 rounded-2xl bg-emerald-500/5 border border-emerald-500/20">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                    <Cloud className="w-5 h-5 text-emerald-400" />
+                    <span>Seedr Library</span>
+                    {seedrConfigured && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                        {seedrFiles.length} files
+                      </span>
+                    )}
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Files already downloaded to your Seedr account stay visible here, even after refreshing Torrent Studio.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={loadSeedrLibrary}
+                  disabled={seedrLoading}
+                  className="shrink-0 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${seedrLoading ? 'animate-spin' : ''}`} />
+                  <span>{seedrLoading ? 'Refreshing...' : 'Refresh Seedr'}</span>
+                </button>
+              </div>
+
+              {seedrError && (
+                <div className="mt-3 rounded-xl bg-rose-500/10 border border-rose-500/20 px-3 py-2 text-xs text-rose-300">
+                  {seedrError}
+                </div>
+              )}
+
+              {!seedrLoading && !seedrError && !seedrConfigured && (
+                <div className="mt-3 rounded-xl bg-slate-900/70 border border-slate-800 px-3 py-3 text-xs text-slate-400">
+                  Seedr is not configured on the server.
+                </div>
+              )}
+
+              {!seedrLoading && !seedrError && seedrConfigured && seedrFiles.length === 0 && (
+                <div className="mt-3 rounded-xl bg-slate-900/70 border border-slate-800 px-3 py-3 text-xs text-slate-400">
+                  No completed files are currently visible in your Seedr library.
+                </div>
+              )}
+
+              {seedrConfigured && seedrFiles.length > 0 && (
+                <div className="mt-3 grid grid-cols-1 gap-2">
+                  {seedrFiles.map(file => (
+                    <div
+                      key={file.id}
+                      className="flex items-center justify-between gap-3 rounded-xl bg-slate-900/80 border border-slate-800 px-3 py-2.5"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-slate-200">{file.name}</div>
+                        <div className="text-[10px] text-slate-500 mt-0.5">
+                          {formatBytes(file.size)} • {file.folderPath === '/' ? 'Root' : file.folderPath}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadSeedrFile(file.id)}
+                        className="shrink-0 px-2.5 py-1.5 rounded-lg bg-emerald-400 text-slate-950 font-bold text-xs hover:bg-emerald-300 transition"
+                      >
+                        Download
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {/* Header & Breadcrumb & Search */}
             <div className="flex flex-col gap-3 p-4 rounded-2xl bg-slate-900 border border-slate-800">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
