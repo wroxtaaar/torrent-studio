@@ -412,7 +412,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
          selectedFileIndexes,
          manifest,
          inspectedHash || undefined,
-         isDirectSeedrSource && inspectedFiles.length > 1 ? 'qbittorrent' : undefined
+         isDirectSeedrSource && inspectedFiles.length > 1 ? 'seedr' : undefined
        );
       setBackgroundMode(false);
       onClose();
