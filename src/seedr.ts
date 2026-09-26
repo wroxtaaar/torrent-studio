@@ -539,7 +539,36 @@ export async function getSeedrTaskStatus(
     };
   }
 
-  let candidates = await taskFiles(id);
+  let candidates: any[] = [];
+  try {
+    candidates = await taskFiles(id);
+  } catch (error) {
+    // A newly-finished Seedr task can briefly report its terminal state before
+    // its files are exposed through /tasks/:id/contents. Keep it in progress
+    // until the files actually exist, instead of falsely reporting "downloaded".
+    if (getStatus(error) === 404) {
+      return {
+        taskId,
+        status: 'downloading',
+        progress: Math.min(progress, 99.9),
+        task,
+        files: [],
+        downloadUrl: null,
+      };
+    }
+    throw error;
+  }
+
+  if (!candidates.length) {
+    return {
+      taskId,
+      status: 'downloading',
+      progress: Math.min(progress, 99.9),
+      task,
+      files: [],
+      downloadUrl: null,
+    };
+  }
 
   const normalizedSelected = selectedNames
     .map(fileNameOnly)
