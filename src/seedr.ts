@@ -262,9 +262,13 @@ export async function getSeedrQuota(): Promise<SeedrQuota> {
 const SEEDR_LIBRARY_FOLDER_ID = String(process.env.SEEDR_LIBRARY_FOLDER_ID || '').trim();
 
 export async function addSeedrTask(magnet: string): Promise<any> {
+  if (!SEEDR_LIBRARY_FOLDER_ID || !/^\d+$/.test(SEEDR_LIBRARY_FOLDER_ID)) {
+    throw new Error('SEEDR_LIBRARY_FOLDER_ID must be configured for Torrent Studio Seedr downloads');
+  }
+
   return seedrRequest('/tasks', 'POST', {
     torrent_magnet: magnet,
-    folder_id: SEEDR_LIBRARY_FOLDER_ID ? Number(SEEDR_LIBRARY_FOLDER_ID) : 0,
+    folder_id: Number(SEEDR_LIBRARY_FOLDER_ID),
   });
 }
 
