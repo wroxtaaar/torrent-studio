@@ -964,7 +964,7 @@ def _seedr_folder(folder: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _seedr_progress(value: Any, depth: int = 0) -> float | None:
+def _seedr_progress_value(value: Any, depth: int = 0) -> float | None:
     if value is None or depth > 5:
         return None
     if isinstance(value, (int, float)):
@@ -984,7 +984,7 @@ def _seedr_progress(value: Any, depth: int = 0) -> float | None:
         "completed_percent", "completedPercent",
     ):
         if key in value:
-            result = _seedr_progress(value[key], depth + 1)
+            result = _seedr_progress_value(value[key], depth + 1)
             if result is not None:
                 return result
     try:
@@ -996,7 +996,7 @@ def _seedr_progress(value: Any, depth: int = 0) -> float | None:
         pass
     for key, child in value.items():
         if "progress" in str(key).lower() or "percent" in str(key).lower():
-            result = _seedr_progress(child, depth + 1)
+            result = _seedr_progress_value(child, depth + 1)
             if result is not None:
                 return result
     return None
@@ -1039,7 +1039,7 @@ async def _seedr_file_details(file_id: str) -> dict[str, Any]:
 
 
 async def _seedr_progress(task_id: str, task: dict[str, Any]) -> tuple[float, dict[str, Any]]:
-    direct = _seedr_progress(task.get("progress"))
+    direct = _seedr_progress_value(task.get("progress"))
     if direct is not None and direct > 0:
         return min(100, max(0, direct)), task
     try:
@@ -1063,10 +1063,10 @@ async def _seedr_progress(task_id: str, task: dict[str, Any]) -> tuple[float, di
                         except Exception:
                             pass
                 merged = {**task, **(_seedr_data(progress_data) if isinstance(_seedr_data(progress_data), dict) else {})}
-                value = _seedr_progress(merged)
+                value = _seedr_progress_value(merged)
                 return min(100, max(0, value or 0)), merged
         merged = {**task, **(result if isinstance(result, dict) else {})}
-        return min(100, max(0, _seedr_progress(merged) or 0)), merged
+        return min(100, max(0, _seedr_progress_value(merged) or 0)), merged
     except Exception:
         return min(100, max(0, direct or 0)), task
 
