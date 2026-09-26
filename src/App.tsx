@@ -112,6 +112,7 @@ export default function App() {
   const [seedrQuota, setSeedrQuota] = useState<{ maxSpace: number; usedSpace: number; remainingSpace: number } | null>(null);
   const [seedrLoading, setSeedrLoading] = useState(false);
   const [seedrError, setSeedrError] = useState<string | null>(null);
+  const [seedrDeleteNotice, setSeedrDeleteNotice] = useState<string | null>(null);
   const [selectedSeedrFolderId, setSelectedSeedrFolderId] = useState<string | null>(() => {
     try {
       return window.localStorage.getItem('seedflow_seedr_folder') || null;
@@ -677,6 +678,7 @@ export default function App() {
   };
 
   const handleDeleteSeedrFile = async (file: { id: string; name: string; size: number; folderId: string; folderPath: string }) => {
+    setSeedrDeleteNotice('Deleting…');
     try {
       // A single-file Seedr folder is represented directly in My Cloud Files.
       // In that special case, delete the whole Seedr folder rather than only
@@ -695,6 +697,8 @@ export default function App() {
       }
 
       setSeedrError(null);
+      setSeedrDeleteNotice('Deleted successfully');
+      window.setTimeout(() => setSeedrDeleteNotice(null), 1800);
       const quota = await api.getSeedrQuota().catch(() => null);
       if (quota?.configured) {
         setSeedrQuota({
@@ -704,17 +708,21 @@ export default function App() {
         });
       }
     } catch (error) {
+      setSeedrDeleteNotice(null);
       console.error('Failed to delete Seedr item:', error);
       setSeedrError(error instanceof Error ? error.message : 'Failed to delete Seedr item');
     }
   };
 
   const handleDeleteSeedrFolder = async (folderId: string) => {
+    setSeedrDeleteNotice('Deleting…');
     try {
       await api.deleteSeedrFolder(folderId);
       setSeedrFiles(prev => prev.filter(item => item.folderId !== folderId));
       setSelectedSeedrFolderId(prev => prev === folderId ? null : prev);
       setSeedrError(null);
+      setSeedrDeleteNotice('Deleted successfully');
+      window.setTimeout(() => setSeedrDeleteNotice(null), 1800);
       const quota = await api.getSeedrQuota().catch(() => null);
       if (quota?.configured) {
         setSeedrQuota({
@@ -724,6 +732,7 @@ export default function App() {
         });
       }
     } catch (error) {
+      setSeedrDeleteNotice(null);
       console.error('Failed to delete Seedr folder:', error);
       setSeedrError(error instanceof Error ? error.message : 'Failed to delete Seedr folder');
     }
@@ -1162,6 +1171,12 @@ export default function App() {
           <div className="space-y-4">
             {/* Persistent Seedr Library */}
             <div className="p-4 rounded-2xl bg-emerald-500/5 border border-emerald-500/20">
+              {seedrDeleteNotice && (
+                <div className="mb-3 flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-300">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>{seedrDeleteNotice}</span>
+                </div>
+              )}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="min-w-0">
                   <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
