@@ -545,6 +545,70 @@ async function inspectMetadata(source: string) {
   return null;
 }
 
+function parseTorrentDescriptor(data: Buffer): {
+  name: string;
+  files: Array<{ index: number; name: string; size: number; path: string; type: string; priority: number }>;
+  totalSize: number;
+} | null {
+  if (!data.length || data.length > 50 * 1024 * 1024) return null;
+
+  try {
+    const decoded: any = bencode.decode(data);
+    if (!decoded?.info) return null;
+
+    const decodeText = (value: any): string => {
+      if (Buffer.isBuffer(value)) return value.toString('utf8');
+      if (value instanceof Uint8Array) return Buffer.from(value).toString('utf8');
+      return typeof value === 'string' ? value : '';
+    };
+
+    const name = decodeText(decoded.info.name) || 'Torrent';
+    const rawFiles = Array.isArray(decoded.info.files) ? decoded.info.files : [];
+
+    const classify = (fileName: string): string => {
+      const lower = fileName.toLowerCase();
+      if (/\.(mp4|mkv|m4v|webm|mov|avi|m3u8|ts)$/i.test(lower)) return 'video';
+      if (/\.(mp3|wav|flac|aac|ogg|m4a)$/i.test(lower)) return 'audio';
+      if (/\.(zip|rar|7z|tar|gz|iso)$/i.test(lower)) return 'archive';
+      if (/\.(pdf|txt|md|json|csv|srt|vtt)$/i.test(lower)) return 'document';
+      return 'other';
+    };
+
+    const files = rawFiles.length
+      ? rawFiles.map((file: any, index: number) => {
+          const parts = Array.isArray(file.path)
+            ? file.path.map((part: any) => decodeText(part))
+            : [decodeText(file.path)];
+          const relativePath = parts.filter(Boolean).join('/');
+          const fileName = relativePath.split('/').pop() || relativePath || name;
+          return {
+            index,
+            name: relativePath || fileName,
+            size: Number(file.length || 0),
+            path: relativePath || fileName,
+            type: classify(fileName),
+            priority: 1,
+          };
+        })
+      : [{
+          index: 0,
+          name,
+          size: Number(decoded.info.length || 0),
+          path: name,
+          type: classify(name),
+          priority: 1,
+        }];
+
+    return {
+      name,
+      files,
+      totalSize: files.reduce((sum, file) => sum + file.size, 0),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function installQbtProxy(app: Express) {
   app.post('/api/seedr/tasks/prepare', async (req: Request, res: Response) => {
     try {
@@ -949,6 +1013,44 @@ export function installQbtProxy(app: Express) {
         }
 
         const category = String((req.body as any)?.category || 'Downloads');
+
+        // Search results backed by a .torrent descriptor can be inspected
+        // directly without creating a qBittorrent metadata task.
+        if (isInternalSearchGrab) {
+          try {
+            const descriptorUrl =
+              internalServerBase +
+              source +
+              (source.includes('?') ? '&' : '?') +
+              'format=torrent';
+
+            const descriptorResponse = await fetch(descriptorUrl, {
+              headers: { Accept: 'application/x-bittorrent, application/octet-stream, */*' },
+            });
+
+            if (descriptorResponse.ok) {
+              const descriptor = Buffer.from(await descriptorResponse.arrayBuffer());
+              const parsed = parseTorrentDescriptor(descriptor);
+
+              if (parsed) {
+                return res.json({
+                  name: parsed.name,
+                  hash: '',
+                  files: parsed.files,
+                  totalSize: parsed.totalSize,
+                  source: 'search_torrent_descriptor',
+                  pending: false,
+                  createdPreview: false,
+                });
+              }
+            }
+          } catch (error: any) {
+            console.warn(
+              '[SEARCH-INSPECT] Direct torrent parsing failed; falling back to qBittorrent:',
+              error?.message || error
+            );
+          }
+        }
 
         // The preview flow intentionally creates or reuses the torrent PAUSED.
         // That lets qBittorrent resolve metadata through its normal torrent
