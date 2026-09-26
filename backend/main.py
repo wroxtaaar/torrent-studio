@@ -2081,6 +2081,27 @@ async def seedr_file_stream(name: str = Query(...), type: str = Query("video")):
     return {"url": url, "name": file["name"]}
 
 
+@app.delete("/api/seedr/tasks/{task_id}")
+async def seedr_task_delete(task_id: str):
+    if not SEEDR_TOKEN:
+        raise HTTPException(503, "Seedr is not configured")
+
+    task_id = str(task_id).strip()
+    if not task_id:
+        raise HTTPException(400, "Seedr task id is required")
+
+    # Seedr v0.1 supports deleting an active task directly. This is the
+    # operation used by the Cancel button in the frontend.
+    try:
+        return await seedr_request(f"/tasks/{quote(task_id)}", "DELETE")
+    except HTTPException as exc:
+        # If the task has already disappeared, cancellation has effectively
+        # succeeded. Keep the UI idempotent.
+        if exc.status_code == 404:
+            return {"success": True, "alreadyGone": True, "taskId": task_id}
+        raise
+
+
 @app.delete("/api/seedr/files/{file_id}")
 async def seedr_file_delete(file_id: str):
     return await seedr_request(f"/fs/file/{quote(str(file_id))}", "DELETE")
