@@ -199,14 +199,6 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
           : 'Adding torrent paused and waiting for qBittorrent metadata...'
       );
 
-      } else {
-        setInspectionSource(
-          isSearchGrab
-            ? 'Loading torrent metadata...'
-            : 'Adding torrent paused and waiting for qBittorrent metadata...'
-        );
-      }
-
       const data = await api.inspectMagnet(source, category);
 
       if (data && Array.isArray(data.files) && data.files.length > 0) {
