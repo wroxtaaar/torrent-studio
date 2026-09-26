@@ -447,7 +447,9 @@ export default function App() {
     selectedFiles?: number[],
     manifest?: { name: string; size: number; priority: number }[],
     existingHash?: string,
-    forceBackend?: 'seedr' | 'qbittorrent'
+    forceBackend?: 'seedr' | 'qbittorrent',
+    selectedNames?: string[],
+    seedrTaskId?: number | string
   ) => {
     try {
       if (seedrDownloadActive && forceBackend !== 'qbittorrent') {
@@ -458,7 +460,7 @@ export default function App() {
         throw error;
       }
 
-      const result = await api.addMagnet(magnet, category, selectedFiles, manifest, existingHash, forceBackend);
+      const result = await api.addMagnet(magnet, category, selectedFiles, manifest, existingHash, forceBackend, selectedNames, seedrTaskId);
       if (result.backend === 'seedr') {
         setSeedrNotice({
           taskId: result.seedrTaskId ?? null,
