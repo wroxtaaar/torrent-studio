@@ -728,36 +728,6 @@ async def recent_clear():
     return {"success": True}
 
 
-async def _torrent_file_count_from_url(download_url: str, prowlarr_base: str, prowlarr_key: str) -> int | None:
-    """Best-effort count of files from a .torrent descriptor returned by Prowlarr."""
-    url = str(download_url or "").strip()
-    if not url or url.lower().startswith("magnet:"):
-        return None
-    url = urljoin(prowlarr_base + "/", url)
-
-    try:
-        import bencodepy
-        async with httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
-            response = await client.get(
-                url,
-                headers={"Accept": "application/x-bittorrent, application/octet-stream", "X-Api-Key": prowlarr_key},
-            )
-        if response.status_code >= 400 or len(response.content) > 8 * 1024 * 1024:
-            return None
-
-        decoded = bencodepy.decode(response.content)
-        info = decoded.get(b"info") if isinstance(decoded, dict) else None
-        if not isinstance(info, dict):
-            return None
-
-        files = info.get(b"files")
-        if isinstance(files, list):
-            return len(files)
-        return 1
-    except Exception:
-        return None
-
-
 async def prowlarr_search(query: str, limit: int) -> list[dict[str, Any]]:
     base = (os.getenv("PROWLARR_URL") or "http://prowlarr:9696").rstrip("/")
     key = os.getenv("PROWLARR_API_KEY", "")
@@ -778,13 +748,6 @@ async def prowlarr_search(query: str, limit: int) -> list[dict[str, Any]]:
     for release in releases:
         if str(release.get("protocol", "")).lower() == "usenet":
             continue
-        download_url = str(release.get("downloadUrl") or "").strip() or None
-        explicit_count = release.get("fileCount")
-        try:
-            explicit_count = int(explicit_count) if explicit_count is not None else None
-        except (TypeError, ValueError):
-            explicit_count = None
-
         result.append({
             "guid": release.get("guid"),
             "title": str(release.get("title") or release.get("sortTitle") or "Untitled"),
@@ -796,30 +759,10 @@ async def prowlarr_search(query: str, limit: int) -> list[dict[str, Any]]:
             "publishDate": release.get("publishDate"),
             "infoHash": str(release.get("infoHash") or ""),
             "magnetUrl": str(release.get("magnetUrl") or release.get("magneturl") or "") or None,
-            "downloadUrl": download_url,
-            "fileCount": explicit_count,
             "infoUrl": str(release.get("infoUrl") or "").strip() or None,
-            "sourceUrl": str(release.get("magnetUrl") or download_url or "").strip() or None,
+            "sourceUrl": str(release.get("magnetUrl") or release.get("downloadUrl") or "").strip() or None,
         })
-    semaphore = asyncio.Semaphore(4)
-
-    async def enrich(item: dict[str, Any]) -> dict[str, Any]:
-        if item.get("fileCount") is not None:
-            return item
-        download_url = item.get("downloadUrl")
-        if not download_url:
-            return item
-        async with semaphore:
-            count = await _torrent_file_count_from_url(
-                str(download_url),
-                base,
-                key,
-            )
-        if count is not None:
-            item["fileCount"] = count
-        return item
-
-    return await asyncio.gather(*(enrich(item) for item in result))
+    return result
 
 
 @app.get("/api/search/torrents")
@@ -842,19 +785,9 @@ async def search_torrents(q: str = "", limit: int = 10):
         cached_at = float(cached.get("cachedAt") or 0)
         cached_results = cached.get("results")
         if now - cached_at < SEARCH_CACHE_TTL_SECONDS and isinstance(cached_results, list):
-            # Older cached entries predate the file-count enrichment. Refresh
-            # those searches once so the UI can populate file counts.
-            cache_has_file_counts = all(
-                isinstance(item, dict) and (
-                    item.get("fileCount") is not None
-                    or not item.get("downloadUrl")
-                )
-                for item in cached_results
-            )
-            if cache_has_file_counts:
-                searches = read_json(RECENT_SEARCHES_FILE, [])
-                write_json(RECENT_SEARCHES_FILE, [query] + [x for x in searches if x != query][:9])
-                return {"results": cached_results, "cached": True}
+            searches = read_json(RECENT_SEARCHES_FILE, [])
+            write_json(RECENT_SEARCHES_FILE, [query] + [x for x in searches if x != query][:9])
+            return {"results": cached_results, "cached": True}
 
     result = await prowlarr_search(query, limit)
 
