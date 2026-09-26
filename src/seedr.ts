@@ -45,21 +45,23 @@ export async function getSeedrQuota(): Promise<SeedrQuota> {
     // Fall through to the live library metadata fallback.
   }
 
-  try {
-    const result = await seedrRequest('/fs/root/contents');
-    const data = unwrapData(result);
-    const maxSpace = Number(data?.max_space ?? data?.maxSpace ?? 0);
-    const usedSpace = Number(data?.used_space ?? data?.usedSpace ?? 0);
+  for (const path of ['/fs/root/contents', '/fs/path?path=%2F&contents=true']) {
+    try {
+      const result = await seedrRequest(path);
+      const data = unwrapData(result);
+      const maxSpace = Number(data?.max_space ?? data?.maxSpace ?? 0);
+      const usedSpace = Number(data?.used_space ?? data?.usedSpace ?? 0);
 
-    if (maxSpace > 0 && usedSpace >= 0 && usedSpace <= maxSpace) {
-      return {
-        maxSpace,
-        usedSpace,
-        remainingSpace: Math.max(0, maxSpace - usedSpace),
-      };
+      if (maxSpace > 0 && usedSpace >= 0 && usedSpace <= maxSpace) {
+        return {
+          maxSpace,
+          usedSpace,
+          remainingSpace: Math.max(0, maxSpace - usedSpace),
+        };
+      }
+    } catch {
+      // Try the next live Seedr source.
     }
-  } catch {
-    // Preserve the original quota error if both sources are unavailable.
   }
 
   throw new Error('Seedr quota information is temporarily unavailable');
@@ -203,11 +205,13 @@ function normalizeFolder(folder: any): { id: string; name: string } {
 }
 
 function extractFiles(payload: any, folderId = ''): any[] {
-  return asArray(payload, ['files', 'items']).map(file => normalizeFile(file, folderId));
+  const data = unwrapData(payload);
+  return asArray(data, ['files', 'items']).map(file => normalizeFile(file, folderId));
 }
 
 function extractFolders(payload: any): any[] {
-  return asArray(payload, ['folders', 'directories']).map(normalizeFolder);
+  const data = unwrapData(payload);
+  return asArray(data, ['folders', 'directories']).map(normalizeFolder);
 }
 
 async function getTask(taskId: string | number): Promise<any> {
