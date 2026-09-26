@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import mimetypes
@@ -559,8 +560,18 @@ async def search_torrents(q: str = "", limit: int = 10):
 
 
 @app.get("/api/files")
-async def files_list():
-    return {"files": scan_files()}
+async def files_list(folder: str = "/", search: str = "", type: str = "all"):
+    files = scan_files()
+    folder_value = folder or "/"
+    search_value = search.strip().lower()
+    type_value = type.strip().lower()
+    if folder_value != "/":
+        files = [item for item in files if item.get("folder") == folder_value]
+    if search_value:
+        files = [item for item in files if search_value in item.get("name", "").lower()]
+    if type_value and type_value != "all":
+        files = [item for item in files if item.get("type") == type_value]
+    return files
 
 
 @app.get("/api/files/download/{identifier}")
@@ -733,9 +744,24 @@ async def create_user(body: dict[str, Any]):
 async def storage_stats():
     usage = shutil.disk_usage(DOWNLOADS_DIR)
     used = usage.total - usage.free
+    percentage = round((used / usage.total) * 100, 2) if usage.total else 0
+    try:
+        torrents = await qbt.torrents_info()
+        torrent_count = len(torrents)
+    except Exception:
+        torrent_count = 0
+    file_count = len(scan_files())
+    alert = "critical" if percentage > 90 else "warning" if percentage > 80 else "normal"
     return {
-        "total": usage.total, "used": used, "free": usage.free,
-        "usedPercent": round((used / usage.total) * 100, 2) if usage.total else 0,
+        "totalBytes": usage.total,
+        "usedBytes": used,
+        "freeBytes": usage.free,
+        "usedPercentage": percentage,
+        "filesCount": file_count,
+        "torrentsCount": torrent_count,
+        "isUnlimited": False,
+        "serverCapacityLabel": f"{usage.total / (1024 ** 3):.1f} GB server storage",
+        "alertLevel": alert,
     }
 
 
@@ -860,97 +886,438 @@ async def torrent_file_path_for_hash(hash: str, index: int) -> Path:
     return torrent_file_path(torrents[0], index)
 
 
-# Optional Seedr compatibility layer. It deliberately stays disabled unless a token
-# is supplied, matching the existing hybrid design without exposing account-wide files.
-SEEDR_TOKEN = os.getenv("SEEDR_API_TOKEN", "")
-SEEDR_BASE = "https://www.seedr.cc/rest"
+# Seedr integration compatible with the working Node implementation.
+SEEDR_TOKEN = os.getenv("SEEDR_API_TOKEN", "").strip()
+SEEDR_BASE = "https://www.seedr.cc/api/v0.1/p"
+SEEDR_LIBRARY_FOLDER_ID = os.getenv("SEEDR_LIBRARY_FOLDER_ID", "").strip()
+SEEDR_MAX_SIZE_BYTES = int(float(os.getenv("SEEDR_MAX_SIZE_GB", "5")) * 1024 * 1024 * 1024)
 
 
-async def seedr_request(path: str, method: str = "GET", **kwargs: Any) -> Any:
+def _seedr_data(value: Any) -> Any:
+    if isinstance(value, dict) and "data" in value:
+        return value["data"]
+    return value
+
+
+async def seedr_request(path: str, method: str = "GET", body: Any = None) -> Any:
     if not SEEDR_TOKEN:
         raise HTTPException(503, "Seedr is not configured")
-    headers = kwargs.pop("headers", {})
-    headers["Authorization"] = f"Bearer {SEEDR_TOKEN}"
+    endpoint = SEEDR_BASE.rstrip("/") + "/" + str(path).lstrip("/")
+    headers = {
+        "Authorization": f"Bearer {SEEDR_TOKEN}",
+        "Accept": "application/json",
+    }
+    if body is not None:
+        headers["Content-Type"] = "application/json"
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        response = await client.request(method, SEEDR_BASE + path, headers=headers, **kwargs)
-    if response.status_code >= 400:
-        raise HTTPException(response.status_code, response.text)
+        response = await client.request(method, endpoint, headers=headers, json=body)
+    text = response.text
     try:
-        return response.json()
+        data = response.json() if text else None
     except Exception:
-        return response.text
+        data = text
+    if response.status_code >= 400:
+        if isinstance(data, dict):
+            message = data.get("error") or data.get("message") or text
+            if isinstance(message, dict):
+                message = message.get("message") or str(message)
+        else:
+            message = text
+        raise HTTPException(response.status_code, str(message or "Seedr API request failed"))
+    return data
+
+
+def _seedr_array(value: Any, keys: tuple[str, ...] = ()) -> list[dict[str, Any]]:
+    data = _seedr_data(value)
+    if isinstance(data, list):
+        return data
+    if not isinstance(data, dict):
+        return []
+    for key in keys:
+        candidate = data.get(key)
+        if isinstance(candidate, list):
+            return candidate
+        if isinstance(candidate, dict):
+            nested = _seedr_array(candidate, keys)
+            if nested:
+                return nested
+    for key in ("contents", "items", "data"):
+        candidate = data.get(key)
+        if isinstance(candidate, list):
+            return candidate
+    return []
+
+
+def _seedr_file(file: dict[str, Any], folder_id: str = "") -> dict[str, Any]:
+    return {
+        "id": str(file.get("id") or file.get("file_id") or file.get("folder_file_id") or ""),
+        "name": str(file.get("name") or file.get("filename") or file.get("path") or ""),
+        "size": int(file.get("size") or file.get("length") or 0),
+        "folderId": str(file.get("folder_id") or file.get("folderId") or folder_id),
+    }
+
+
+def _seedr_folder(folder: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(folder.get("id") or folder.get("folder_id") or ""),
+        "name": str(folder.get("name") or folder.get("title") or folder.get("path") or "Folder"),
+    }
+
+
+def _seedr_progress(value: Any, depth: int = 0) -> float | None:
+    if value is None or depth > 5:
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+        return number * 100 if 0 <= number <= 1 else number
+    if isinstance(value, str):
+        try:
+            number = float(value.strip())
+            return number * 100 if 0 <= number <= 1 else number
+        except ValueError:
+            return None
+    if not isinstance(value, dict):
+        return None
+    for key in (
+        "progress", "percent", "percentage", "progress_percent",
+        "progressPercentage", "downloaded_percent", "downloadedPercent",
+        "completed_percent", "completedPercent",
+    ):
+        if key in value:
+            result = _seedr_progress(value[key], depth + 1)
+            if result is not None:
+                return result
+    try:
+        downloaded = float(value.get("downloaded") or value.get("downloaded_bytes") or value.get("bytes_downloaded") or 0)
+        size = float(value.get("size") or value.get("total_size") or value.get("total_bytes") or 0)
+        if downloaded >= 0 and size > 0:
+            return downloaded / size * 100
+    except (TypeError, ValueError):
+        pass
+    for key, child in value.items():
+        if "progress" in str(key).lower() or "percent" in str(key).lower():
+            result = _seedr_progress(child, depth + 1)
+            if result is not None:
+                return result
+    return None
+
+
+def _seedr_task_complete(task: dict[str, Any]) -> bool:
+    state = str(
+        task.get("state") or task.get("status") or
+        (task.get("task") or {}).get("state") or
+        (task.get("task") or {}).get("status") or ""
+    ).lower()
+    progress = _seedr_progress(task.get("progress"))
+    return state in {"finished", "completed", "complete"} or (progress is not None and progress >= 100)
+
+
+async def _seedr_task(task_id: str) -> Any:
+    return await seedr_request(f"/tasks/{quote(str(task_id))}")
+
+
+async def _seedr_task_contents(task_id: str) -> list[dict[str, Any]]:
+    payload = await seedr_request(f"/tasks/{quote(str(task_id))}/contents")
+    return [_seedr_file(item) for item in _seedr_array(payload, ("files", "items"))]
+
+
+async def _seedr_download_url(file_id: str) -> dict[str, str]:
+    payload = _seedr_data(await seedr_request(f"/download/file/{quote(str(file_id))}/url"))
+    if isinstance(payload, dict):
+        url = str(payload.get("url") or payload.get("download_url") or payload.get("downloadUrl") or payload.get("direct_url") or "")
+        name = str(payload.get("name") or payload.get("filename") or "")
+    else:
+        url, name = str(payload or ""), ""
+    if not url:
+        raise HTTPException(502, "Seedr did not return a download URL")
+    return {"url": url, "name": name}
+
+
+async def _seedr_file_details(file_id: str) -> dict[str, Any]:
+    payload = _seedr_data(await seedr_request(f"/fs/file/{quote(str(file_id))}"))
+    return payload if isinstance(payload, dict) else {}
+
+
+async def _seedr_progress(task_id: str, task: dict[str, Any]) -> tuple[float, dict[str, Any]]:
+    direct = _seedr_progress(task.get("progress"))
+    if direct is not None and direct > 0:
+        return min(100, max(0, direct)), task
+    try:
+        result = _seedr_data(await seedr_request(f"/tasks/{quote(str(task_id))}/progress"))
+        progress_url = ""
+        if isinstance(result, dict):
+            progress_url = str(result.get("url") or result.get("progress_url") or result.get("progressUrl") or "")
+        if progress_url:
+            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+                response = await client.get(progress_url, headers={"Accept": "application/json, text/plain, */*"})
+            if response.status_code < 400:
+                text = response.text
+                try:
+                    progress_data = response.json() if text else {}
+                except Exception:
+                    progress_data = {}
+                    left, right = text.find("{"), text.rfind("}")
+                    if left >= 0 and right > left:
+                        try:
+                            progress_data = json.loads(text[left:right + 1])
+                        except Exception:
+                            pass
+                merged = {**task, **(_seedr_data(progress_data) if isinstance(_seedr_data(progress_data), dict) else {})}
+                value = _seedr_progress(merged)
+                return min(100, max(0, value or 0)), merged
+        merged = {**task, **(result if isinstance(result, dict) else {})}
+        return min(100, max(0, _seedr_progress(merged) or 0)), merged
+    except Exception:
+        return min(100, max(0, direct or 0)), task
+
+
+async def _seedr_set_unwanted(task_id: str, file_count: int, indexes: list[int]) -> None:
+    wanted = {int(index) for index in indexes if 0 <= int(index) < file_count}
+    for msb_first in (False, True):
+        raw = bytearray((file_count + 7) // 8)
+        for index in wanted:
+            byte_index, bit_index = divmod(index, 8)
+            raw[byte_index] |= 1 << (7 - bit_index if msb_first else bit_index)
+        encoded = base64.b64encode(bytes(raw)).decode()
+        await seedr_request(f"/tasks/{quote(str(task_id))}/unwanted", "POST", {"unwanted": encoded})
+        try:
+            current = _seedr_data(await seedr_request(f"/tasks/{quote(str(task_id))}/unwanted"))
+            encoded_current = current if isinstance(current, str) else (current or {}).get("unwanted")
+            if encoded_current:
+                decoded = base64.b64decode(encoded_current)
+                actual = {
+                    index for index in range(file_count)
+                    if decoded[index // 8] & (1 << (7 - (index % 8) if msb_first else index % 8))
+                }
+                if actual == wanted:
+                    return
+        except Exception:
+            pass
+    raise HTTPException(502, "Seedr did not preserve the requested file selection")
+
+
+async def _seedr_collect(folder_id: str, folder_path: str = "/", depth: int = 0) -> list[dict[str, Any]]:
+    if depth > 8:
+        return []
+    try:
+        payload = _seedr_data(await seedr_request(f"/fs/folder/{quote(str(folder_id))}/contents"))
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            return []
+        raise
+    if not isinstance(payload, dict):
+        return []
+    files = [
+        {**_seedr_file(item, folder_id), "folderPath": folder_path}
+        for item in _seedr_array(payload, ("files", "items"))
+    ]
+    nested = []
+    for raw in _seedr_array(payload, ("folders", "directories")):
+        folder = _seedr_folder(raw)
+        if folder["id"]:
+            child = folder_path.rstrip("/") + "/" + folder["name"]
+            nested.extend(await _seedr_collect(folder["id"], child, depth + 1))
+    return files + nested
+
+
+async def _seedr_find_file(file_name: str) -> dict[str, Any]:
+    clean = str(file_name).strip()
+    terms = [clean, Path(clean).stem, " ".join(Path(clean).stem.replace("-", " ").replace("_", " ").split()[:8])]
+    last_error: Exception | None = None
+    for term in dict.fromkeys(x for x in terms if x):
+        try:
+            result = _seedr_data(await seedr_request(f"/search/fs?query={quote(term)}"))
+            files = [_seedr_file(item) for item in (result.get("files", []) if isinstance(result, dict) else [])]
+            target = Path(clean).name.lower()
+            exact = next((item for item in files if Path(item["name"]).name.lower() == target), None)
+            if exact:
+                return exact
+            stem = Path(target).stem
+            same_stem = next((item for item in files if Path(item["name"]).stem.lower() == stem), None)
+            if same_stem:
+                return same_stem
+        except Exception as exc:
+            last_error = exc
+    if last_error:
+        raise last_error
+    raise HTTPException(404, f"Seedr file not found: {file_name}")
 
 
 @app.get("/api/seedr/quota")
 async def seedr_quota():
     if not SEEDR_TOKEN:
         return {"configured": False, "maxSpace": 0, "usedSpace": 0, "remainingSpace": 0}
-    data = await seedr_request("/account")
-    return {
-        "configured": True,
-        "maxSpace": int(data.get("max_space", data.get("maxSpace", 0)) or 0),
-        "usedSpace": int(data.get("space_used", data.get("usedSpace", 0)) or 0),
-        "remainingSpace": int(data.get("space_available", data.get("remainingSpace", 0)) or 0),
-    }
+    result = _seedr_data(await seedr_request("/user"))
+    storage = result.get("account", {}).get("storage", {}) if isinstance(result, dict) else {}
+    storage = storage or (result.get("storage", {}) if isinstance(result, dict) else {})
+    max_space = int(storage.get("limit") or storage.get("max_space") or storage.get("maxSpace") or (result.get("max_space") if isinstance(result, dict) else 0) or 0)
+    used_space = int(storage.get("used") or storage.get("used_space") or storage.get("usedSpace") or (result.get("used_space") if isinstance(result, dict) else 0) or 0)
+    if max_space <= 0 or used_space < 0 or used_space > max_space:
+        raise HTTPException(502, "Seedr quota information is temporarily unavailable")
+    return {"configured": True, "maxSpace": max_space, "usedSpace": used_space, "remainingSpace": max(0, max_space - used_space)}
 
 
 @app.post("/api/seedr/tasks/prepare")
 async def seedr_prepare(body: dict[str, Any]):
-    magnet = str(body.get("magnet") or "")
+    magnet = str(body.get("magnet") or "").strip()
+    if not magnet:
+        raise HTTPException(400, "magnet is required")
     if not SEEDR_TOKEN:
         raise HTTPException(503, "Seedr is not configured")
-    data = await seedr_request("/torrent/magnet", "POST", data={"magnet": magnet})
-    return data
+    if not SEEDR_LIBRARY_FOLDER_ID.isdigit():
+        raise HTTPException(503, "SEEDR_LIBRARY_FOLDER_ID must be configured for Torrent Studio Seedr downloads")
+    data = await seedr_request("/tasks", "POST", {
+        "torrent_magnet": magnet,
+        "folder_id": int(SEEDR_LIBRARY_FOLDER_ID),
+    })
+    task = _seedr_data(data)
+    task_id = str((task or {}).get("id") or (task or {}).get("task_id") or "")
+    if not task_id:
+        raise HTTPException(502, "Seedr did not return a task id")
+    files = []
+    try:
+        files = await _seedr_task_contents(task_id)
+    except HTTPException:
+        pass
+    return {
+        "taskId": int(task_id) if task_id.isdigit() else task_id,
+        "name": str((task or {}).get("name") or (task or {}).get("title") or (task or {}).get("torrent_name") or ""),
+        "files": [{"id": f["id"], "name": f["name"], "size": f["size"]} for f in files],
+        "created": True,
+        "paused": False,
+    }
 
 
 @app.get("/api/seedr/tasks/{task_id}")
 async def seedr_task(task_id: str):
-    return await seedr_request(f"/task/{quote(task_id)}")
+    try:
+        raw_task = _seedr_data(await _seedr_task(task_id))
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            return {"taskId": task_id, "name": "", "status": "waiting", "progress": 0, "task": None, "files": [], "downloadUrl": None}
+        raise
+    task = raw_task if isinstance(raw_task, dict) else {}
+    progress, task = await _seedr_progress(task_id, task)
+    if not _seedr_task_complete(task) and progress < 100:
+        return {"taskId": task_id, "name": str(task.get("name") or task.get("title") or task.get("torrent_name") or ""), "status": "downloading", "progress": progress, "task": task, "files": [], "downloadUrl": None}
+    try:
+        candidates = await _seedr_task_contents(task_id)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            return {"taskId": task_id, "name": str(task.get("name") or task.get("title") or ""), "status": "downloading", "progress": min(progress, 99.9), "task": task, "files": [], "downloadUrl": None}
+        raise
+    if not candidates:
+        return {"taskId": task_id, "name": str(task.get("name") or task.get("title") or ""), "status": "downloading", "progress": min(progress, 99.9), "task": task, "files": [], "downloadUrl": None}
+    files = []
+    for file in candidates[:50]:
+        if not file["id"]:
+            continue
+        try:
+            details = await _seedr_file_details(file["id"])
+            download = await _seedr_download_url(file["id"])
+            files.append({
+                "id": file["id"],
+                "name": str(details.get("name") or details.get("filename") or file["name"]),
+                "size": int(details.get("size") or details.get("length") or file["size"]),
+                "url": download["url"],
+            })
+        except Exception:
+            files.append({"id": file["id"], "name": file["name"], "size": file["size"], "url": None})
+    return {
+        "taskId": task_id,
+        "name": str(task.get("name") or task.get("title") or task.get("torrent_name") or ""),
+        "status": "completed",
+        "progress": 100,
+        "task": task,
+        "files": files,
+        "downloadUrl": next((item["url"] for item in files if item.get("url")), None),
+    }
 
 
 @app.delete("/api/seedr/tasks/{task_id}")
 async def seedr_task_delete(task_id: str):
-    return await seedr_request(f"/task/{quote(task_id)}", "DELETE")
+    return await seedr_request(f"/tasks/{quote(str(task_id))}", "DELETE")
 
 
 @app.get("/api/seedr/files")
 async def seedr_files():
     if not SEEDR_TOKEN:
         return {"configured": False, "files": []}
-    data = await seedr_request("/fs/search", params={"query": ""})
-    return {"configured": True, "files": data.get("files", []) if isinstance(data, dict) else []}
+    if not SEEDR_LIBRARY_FOLDER_ID.isdigit():
+        return {"configured": True, "files": []}
+    folder_ids = [SEEDR_LIBRARY_FOLDER_ID]
+    try:
+        tasks = _seedr_array(await seedr_request("/tasks"), ("tasks", "torrents"))
+        for raw in tasks:
+            task = _seedr_data(raw)
+            if not isinstance(task, dict) or str(task.get("folder_id") or "") != SEEDR_LIBRARY_FOLDER_ID:
+                continue
+            if not _seedr_task_complete(task):
+                continue
+            created = str(task.get("folder_created_id") or "")
+            if created:
+                folder_ids.append(created)
+    except Exception:
+        pass
+    files: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for folder_id in dict.fromkeys(folder_ids):
+        for item in await _seedr_collect(folder_id, "/Torrent Studio"):
+            key = item["id"] or f'{item["folderId"]}:{item["folderPath"]}:{item["name"]}'
+            if key not in seen:
+                seen.add(key)
+                files.append(item)
+    return {"configured": True, "files": files}
 
 
 @app.get("/api/seedr/files/{file_id}/download")
 async def seedr_file_download(file_id: str):
-    data = await seedr_request(f"/fs/file/{quote(file_id)}/download")
-    return data
+    return await _seedr_download_url(file_id)
 
 
 @app.get("/api/seedr/files/stream")
-async def seedr_file_stream(file_id: str):
+async def seedr_file_stream(name: str = Query(...), type: str = Query("video")):
     if not SEEDR_TOKEN:
         raise HTTPException(503, "Seedr is not configured")
-    data = await seedr_request(f"/fs/file/{quote(file_id)}/download")
-    url = data.get("url") if isinstance(data, dict) else None
+    file = await _seedr_find_file(name)
+    result = _seedr_data(await seedr_request(f"/search/fs?query={quote(name)}"))
+    candidates = result.get("files", []) if isinstance(result, dict) else []
+    selected = next((item for item in candidates if str(item.get("id") or "") == file["id"]), None)
+    urls = (selected or {}).get("presentation_urls") or (selected or {}).get("presentationUrls") or {}
+    media = urls.get(type) if isinstance(urls, dict) else {}
+    if not isinstance(media, dict):
+        media = {}
+    url = str(media.get("hls") or media.get("url") or media.get("stream") or "")
     if not url:
-        raise HTTPException(502, "Seedr did not return a stream URL")
-    return RedirectResponse(url)
+        raise HTTPException(502, f"Seedr did not return a {type} playback URL for {file['name']}")
+    return {"url": url, "name": file["name"]}
 
 
 @app.delete("/api/seedr/files/{file_id}")
 async def seedr_file_delete(file_id: str):
-    return await seedr_request(f"/fs/file/{quote(file_id)}", "DELETE")
+    return await seedr_request(f"/fs/file/{quote(str(file_id))}", "DELETE")
 
 
 @app.get("/api/seedr/folders/{folder_id}/download")
 async def seedr_folder_download(folder_id: str):
-    return await seedr_request(f"/download/archive/init/{quote(folder_id)}", "PUT")
+    archive_id = str(uuid.uuid4())
+    result = _seedr_data(await seedr_request(
+        f"/download/archive/init/{archive_id}",
+        "PUT",
+        {"archive_arr": [{"type": "folder", "id": int(folder_id)}]},
+    ))
+    if isinstance(result, dict):
+        url = str(result.get("url") or result.get("download_url") or result.get("downloadUrl") or result.get("signed_url") or result.get("signedUrl") or "")
+    else:
+        url = str(result or "")
+    if not url:
+        raise HTTPException(502, "Seedr did not return a folder download URL")
+    return {"url": url}
 
 
 @app.delete("/api/seedr/folders/{folder_id}")
 async def seedr_folder_delete(folder_id: str):
-    return await seedr_request(f"/fs/folder/{quote(folder_id)}", "DELETE")
+    return await seedr_request(f"/fs/folder/{quote(str(folder_id))}", "DELETE")
 
 
 # Serve the existing React UI from the Python process. This keeps the migration
