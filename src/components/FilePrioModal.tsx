@@ -4,8 +4,6 @@ import {
   FileCheck,
   CheckSquare,
   Square,
-  Ban,
-  Check,
   Download
 } from 'lucide-react';
 import { TorrentItem } from '../types/index.ts';
@@ -134,69 +132,69 @@ export const FilePrioModal: React.FC<FilePrioModalProps> = ({
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
           {[...localFiles]
             .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
-               <div
-                 key={file.index}
-                 className="p-3 rounded-xl border text-xs transition flex items-center gap-3 bg-slate-850 border-slate-800 hover:border-slate-700"
-               >
-                 <button
-                   type="button"
-                   disabled={isUpdating}
-                   onClick={() => void toggleDownload(file.index)}
-                   className="shrink-0 p-0.5 rounded focus:outline-none focus:ring-2 focus:ring-cyan-500/40 disabled:opacity-40"
-                   aria-label={isChecked ? `Skip ${file.name}` : `Include ${file.name}`}
-                 >
-                   {isChecked ? (
-                     <CheckSquare className="w-5 h-5 text-cyan-400" />
-                   ) : (
-                     <Square className="w-5 h-5 text-slate-500" />
-                   )}
-                 </button>
+            .map((file) => {
+              const isChecked = file.priority > 0;
+              return (
+                <div
+                  key={file.index}
+                  className="p-3 rounded-xl border text-xs transition flex items-center gap-3 bg-slate-850 border-slate-800 hover:border-slate-700"
+                >
+                  <button
+                    type="button"
+                    disabled={isUpdating}
+                    onClick={() => void toggleDownload(file.index)}
+                    className="shrink-0 p-0.5 rounded focus:outline-none focus:ring-2 focus:ring-cyan-500/40 disabled:opacity-40"
+                    aria-label={isChecked ? `Skip ${file.name}` : `Include ${file.name}`}
+                  >
+                    {isChecked ? (
+                      <CheckSquare className="w-5 h-5 text-cyan-400" />
+                    ) : (
+                      <Square className="w-5 h-5 text-slate-500" />
+                    )}
+                  </button>
 
-                 <button
-                   type="button"
-                   disabled={isUpdating}
-                   onClick={() => void toggleDownload(file.index)}
-                   className="min-w-0 flex-1 text-left disabled:opacity-60"
-                 >
-                   <p className="font-medium font-mono truncate text-slate-200">
-                     {file.name}
-                   </p>
-                   <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400">
-                     <span>{formatBytes(file.size)}</span>
-                     <span>•</span>
-                     <span className={file.progress >= 1 ? 'text-emerald-400 font-semibold' : isChecked ? 'text-cyan-400 font-medium' : 'text-slate-500'}>
-                       {file.progress >= 1
-                         ? `${(file.progress * 100).toFixed(1)}% downloaded`
-                         : isChecked
-                         ? 'Ready to download'
-                         : 'Will be skipped'}
-                     </span>
-                   </div>
-                 </button>
+                  <button
+                    type="button"
+                    disabled={isUpdating}
+                    onClick={() => void toggleDownload(file.index)}
+                    className="min-w-0 flex-1 text-left disabled:opacity-60"
+                  >
+                    <p className="font-medium font-mono truncate text-slate-200">
+                      {file.name}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400">
+                      <span>{formatBytes(file.size)}</span>
+                      <span>•</span>
+                      <span className={file.progress >= 1 ? 'text-emerald-400 font-semibold' : isChecked ? 'text-cyan-400 font-medium' : 'text-slate-500'}>
+                        {file.progress >= 1
+                          ? `${(file.progress * 100).toFixed(1)}% downloaded`
+                          : isChecked
+                          ? 'Ready to download'
+                          : 'Will be skipped'}
+                      </span>
+                    </div>
+                  </button>
 
-                 <div className="flex items-center gap-2 shrink-0">
-                   {file.progress >= 1 && isChecked ? (
-                     <a
-                       href={`/api/torrents/download/${torrent.hash}/${file.index}`}
-                       download={file.name}
-                       className="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold flex items-center gap-1 transition"
-                       title="Download file to device"
-                     >
-                       <Download className="w-3 h-3" />
-                       <span>Save</span>
-                     </a>
-                   ) : (
-                     <span className={`px-2 py-1 rounded-lg text-[10px] font-bold border ${isChecked ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20' : 'bg-slate-800 text-slate-500 border-slate-700'}`}>
-                       {isChecked ? 'Selected' : 'Skipped'}
-                     </span>
-                   )}
-                 </div>
-               </div>
-
+                  <div className="flex items-center gap-2 shrink-0">
+                    {file.progress >= 1 && isChecked ? (
+                      <a
+                        href={`/api/torrents/download/${torrent.hash}/${file.index}`}
+                        download={file.name}
+                        className="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold flex items-center gap-1 transition"
+                        title="Download file to device"
+                      >
+                        <Download className="w-3 h-3" />
+                        <span>Save</span>
+                      </a>
+                    ) : (
+                      <span className={`px-2 py-1 rounded-lg text-[10px] font-bold border ${isChecked ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20' : 'bg-slate-800 text-slate-500 border-slate-700'}`}>
+                        {isChecked ? 'Selected' : 'Skipped'}
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
         </div>
 
         <div className="px-5 py-3 border-t border-slate-800 bg-slate-900 flex justify-between items-center">
