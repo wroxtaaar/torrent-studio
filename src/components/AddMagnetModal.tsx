@@ -71,6 +71,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
   const [customFileCount, setCustomFileCount] = useState<number>(16);
   const [pasteManifestText, setPasteManifestText] = useState('');
   const [inspectedHash, setInspectedHash] = useState('');
+  const [inspectedSeedrTaskId, setInspectedSeedrTaskId] = useState<number | string | null>(null);
   const [backgroundMode, setBackgroundMode] = useState(false);
 
   const inspectTimeoutRef = useRef<any>(null);
@@ -84,6 +85,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       setMagnetInput('');
       setInspectedFiles([]);
       setInspectedHash('');
+      setInspectedSeedrTaskId(null);
       setInspectionSource('');
       setCopiedMagnet(false);
     }
@@ -122,7 +124,8 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
   const startSingleFileDownload = async (
     source: string,
     files: { index: number; name: string; size: number; path?: string; type?: string; priority?: number }[],
-    hash?: string
+    hash?: string,
+    seedrTaskId?: number | string | null
   ) => {
     if (files.length !== 1) return;
 
@@ -160,7 +163,9 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
         [Number(file.index)],
         manifest,
         hash || undefined,
-        forceBackend
+        seedrTaskId != null ? 'seedr' : forceBackend,
+        undefined,
+        seedrTaskId ?? undefined
       );
       setBackgroundMode(false);
       onClose();
@@ -186,17 +191,59 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       setBackgroundMode(true);
       setError('');
       setInspectedFiles([]);
-       setInspectionSource(
-         isSearchGrab
-           ? 'Loading torrent metadata...'
-           : 'Adding torrent paused and waiting for qBittorrent metadata...'
-       );
+      setInspectedSeedrTaskId(null);
+
+      // Direct magnets can use Seedr for metadata without creating a
+      // temporary qBittorrent torrent. Seedr returns the task and contents,
+      // so the selector can use the same task that will perform the download.
+      if (isDirectSeedrSource) {
+        try {
+          setInspectionSource('Loading torrent metadata from Seedr...');
+          const seedr = await api.prepareSeedrMagnet(source);
+          const seedrFiles = (seedr.files || []).map((file, index) => ({
+            index,
+            name: file.name,
+            size: Number(file.size || 0),
+            type: classifyFileType(file.name),
+            priority: 1
+          }));
+
+          if (seedrFiles.length > 0) {
+            const seedrTaskId = seedr.taskId;
+            setInspectedSeedrTaskId(seedrTaskId);
+            applyFileList(seedrFiles);
+            const hashMatch = source.match(/btih:([a-f0-9]{40})/i);
+            const hash = hashMatch ? hashMatch[1].toLowerCase() : '';
+            setInspectedHash(hash);
+
+            if (seedrFiles.length === 1) {
+              await startSingleFileDownload(source, seedrFiles, undefined, seedrTaskId);
+              return;
+            }
+
+            setInspectionSource('✓ Seedr metadata loaded • Multi-file torrent is ready for file selection');
+            return;
+          }
+
+          setInspectionSource('Seedr accepted the torrent, but file metadata is not ready yet. Falling back to qBittorrent metadata...');
+        } catch (seedrError: any) {
+          console.warn('Seedr metadata preparation failed; falling back to qBittorrent:', seedrError);
+          setInspectionSource('Seedr metadata unavailable. Falling back to qBittorrent metadata...');
+        }
+      } else {
+        setInspectionSource(
+          isSearchGrab
+            ? 'Loading torrent metadata...'
+            : 'Adding torrent paused and waiting for qBittorrent metadata...'
+        );
+      }
 
       const data = await api.inspectMagnet(source, category);
 
       if (data && Array.isArray(data.files) && data.files.length > 0) {
         const hash = String(data.hash || '').trim().toLowerCase();
         setInspectedHash(hash);
+        setInspectedSeedrTaskId(null);
          const resolvedSource =
            data.source === 'search_torrent_descriptor' && hash
              ? `magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(data.name || data.files[0]?.name || 'torrent')}`
@@ -293,6 +340,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     setError('');
     setInspectedFiles([]);
     setInspectedHash('');
+    setInspectedSeedrTaskId(null);
     setInspectionSource('');
     if (inspectTimeoutRef.current) clearTimeout(inspectTimeoutRef.current);
   };
@@ -443,14 +491,16 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     try {
       setIsLoading(true);
       setError('');
-       await onAdd(
-         magnetInput.trim(),
-         category,
-         selectedFileIndexes,
-         manifest,
-         inspectedHash || undefined,
-         isDirectSeedrSource && inspectedFiles.length > 1 ? 'seedr' : undefined
-       );
+      await onAdd(
+        magnetInput.trim(),
+        category,
+        selectedFileIndexes,
+        manifest,
+        inspectedHash || undefined,
+        isDirectSeedrSource && inspectedSeedrTaskId != null ? 'seedr' : undefined,
+        undefined,
+        inspectedSeedrTaskId ?? undefined
+      );
       setBackgroundMode(false);
       onClose();
     } catch (err: any) {
