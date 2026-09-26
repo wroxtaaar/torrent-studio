@@ -1202,27 +1202,46 @@ async def _seedr_progress(task_id: str, task: dict[str, Any]) -> tuple[float, di
 
 
 async def _seedr_set_unwanted(task_id: str, file_count: int, indexes: list[int]) -> None:
-    wanted = {int(index) for index in indexes if 0 <= int(index) < file_count}
+    # The Seedr v0.1 endpoint expects a bitmap of *unwanted* file indices.
+    # The UI supplies *selected/wanted* indices, so invert the selection
+    # before encoding the bitmap.
+    selected = {int(index) for index in indexes if 0 <= int(index) < file_count}
+    unwanted = set(range(file_count)) - selected
+
     for msb_first in (False, True):
         raw = bytearray((file_count + 7) // 8)
-        for index in wanted:
+        for index in unwanted:
             byte_index, bit_index = divmod(index, 8)
             raw[byte_index] |= 1 << (7 - bit_index if msb_first else bit_index)
+
         encoded = base64.b64encode(bytes(raw)).decode()
-        await seedr_request(f"/tasks/{quote(str(task_id))}/unwanted", "POST", {"unwanted": encoded})
+        await seedr_request(
+            f"/tasks/{quote(str(task_id))}/unwanted",
+            "POST",
+            {"unwanted": encoded},
+        )
+
         try:
-            current = _seedr_data(await seedr_request(f"/tasks/{quote(str(task_id))}/unwanted"))
-            encoded_current = current if isinstance(current, str) else (current or {}).get("unwanted")
+            current = _seedr_data(
+                await seedr_request(f"/tasks/{quote(str(task_id))}/unwanted"))
+            encoded_current = (
+                current
+                if isinstance(current, str)
+                else (current or {}).get("unwanted")
+            )
             if encoded_current:
                 decoded = base64.b64decode(encoded_current)
                 actual = {
-                    index for index in range(file_count)
-                    if decoded[index // 8] & (1 << (7 - (index % 8) if msb_first else index % 8))
+                    index
+                    for index in range(file_count)
+                    if decoded[index // 8]
+                    & (1 << (7 - (index % 8) if msb_first else index % 8))
                 }
-                if actual == wanted:
+                if actual == unwanted:
                     return
         except Exception:
             pass
+
     raise HTTPException(502, "Seedr did not preserve the requested file selection")
 
 
@@ -1277,7 +1296,7 @@ async def _seedr_find_file(file_name: str) -> dict[str, Any]:
 async def seedr_quota():
     if not SEEDR_TOKEN:
         return {"configured": False, "maxSpace": 0, "usedSpace": 0, "remainingSpace": 0}
-    result = _seedr_data(await seedr_request("/user"))
+    result = _seedr_data(await seedr_request("/me/quota"))
     storage = result.get("account", {}).get("storage", {}) if isinstance(result, dict) else {}
     storage = storage or (result.get("storage", {}) if isinstance(result, dict) else {})
     max_space = int(storage.get("limit") or storage.get("max_space") or storage.get("maxSpace") or (result.get("max_space") if isinstance(result, dict) else 0) or 0)
