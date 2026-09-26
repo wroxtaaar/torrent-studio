@@ -94,9 +94,15 @@ function extractTaskId(result: any): string {
   );
 }
 
+function normalizeTaskPayload(value: any): any {
+  const data = unwrapData(value);
+  return data?.task ?? data?.torrent ?? data;
+}
+
 function taskProgress(task: any): number {
+  const normalized = normalizeTaskPayload(task);
   const raw =
-    task?.progress ??
+    normalized?.progress ??
     task?.percentage ??
     task?.percent ??
     task?.pct ??
@@ -110,17 +116,18 @@ function taskProgress(task: any): number {
 }
 
 function taskIsComplete(task: any): boolean {
-  if (!task) return false;
+  const normalized = normalizeTaskPayload(task);
+  if (!normalized) return false;
 
   const status = String(
-    task?.status ??
+    normalized?.status ??
     task?.state ??
     task?.phase ??
     task?.download_status ??
     ''
   ).toLowerCase();
 
-  return taskProgress(task) >= 100 ||
+  return taskProgress(normalized) >= 100 ||
     ['completed', 'complete', 'finished', 'done', 'success', 'succeeded'].includes(status);
 }
 
@@ -327,8 +334,9 @@ export async function getSeedrTaskStatus(
     throw error;
   }
 
-  const progressResult = await fetchTaskProgress(id, unwrapData(task));
-  task = progressResult.task;
+  task = normalizeTaskPayload(task);
+  const progressResult = await fetchTaskProgress(id, task);
+  task = normalizeTaskPayload(progressResult.task);
   const progress = progressResult.progress;
   const complete = taskIsComplete(task);
 
@@ -430,16 +438,41 @@ async function searchSeedrFiles(query: string): Promise<SeedrSearchFile[]> {
   }));
 }
 
-async function findSeedrFile(fileName: string): Promise<SeedrSearchFile> {
-  const files = await searchSeedrFiles(fileName);
-  const target = fileNameOnly(fileName);
-  const exact = files.find(file => fileNameOnly(file.name) === target) ?? files[0];
+function seedrSearchTerms(fileName: string): string[] {
+  const clean = String(fileName).trim();
+  const withoutExtension = clean.replace(/\.[^.]+$/, '');
+  const terms = [
+    clean,
+    withoutExtension,
+    withoutExtension.split(/[-_.\s]+/).slice(0, 8).join(' '),
+    withoutExtension.split(/[-_.\s]+/).slice(0, 4).join(' '),
+  ].map(value => value.trim()).filter(Boolean);
 
-  if (!exact?.id) {
-    throw new Error(`Seedr file not found: ${fileName}`);
+  return [...new Set(terms)];
+}
+
+async function findSeedrFile(fileName: string): Promise<SeedrSearchFile> {
+  const target = fileNameOnly(fileName);
+  let lastError: unknown = null;
+
+  for (const term of seedrSearchTerms(fileName)) {
+    try {
+      const files = await searchSeedrFiles(term);
+      const exact = files.find(file => fileNameOnly(file.name) === target);
+      if (exact?.id) return exact;
+
+      const sameStem = files.find(file => fileNameOnly(file.name).replace(/\.[^.]+$/, '') === target.replace(/\.[^.]+$/, ''));
+      if (sameStem?.id) return sameStem;
+
+      const partial = files.find(file => file.name.toLowerCase().includes(String(fileName).toLowerCase().slice(0, 20)));
+      if (partial?.id) return partial;
+    } catch (error) {
+      lastError = error;
+    }
   }
 
-  return exact;
+  if (lastError instanceof Error) throw lastError;
+  throw new Error(`Seedr file not found: ${fileName}`);
 }
 
 export async function getSeedrFilePresentation(
