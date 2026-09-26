@@ -714,7 +714,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
                 </div>
 
                 {/* Bulk selection pills */}
-                <div className="flex items-center gap-1.5 text-xs">
+                {!isDirectSeedrPrepared && <div className="flex items-center gap-1.5 text-xs">
                   <button
                     type="button"
                     onClick={() => selectAll(true)}
@@ -745,7 +745,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
                       Audio Only
                     </button>
                   )}
-                </div>
+                </div>}
               </div>
 
               {/* File item list */}
@@ -818,7 +818,7 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 px-3 sm:px-5 py-3 border-t border-slate-800 bg-slate-900/95">
           <div className="text-[11px] sm:text-xs text-slate-400 w-full sm:w-auto">
             {isDirectSeedrPrepared ? (
-               <span>{inspectedFiles.length} file{inspectedFiles.length === 1 ? '' : 's'} found • Seedr is paused</span>
+               <span>{inspectedFiles.length} file{inspectedFiles.length === 1 ? '' : 's'} found • Seedr is paused — review before starting</span>
              ) : isSingleFile && inspectedFiles.length > 0 ? (
               <span>Ready to download</span>
             ) : selectedCount > 0 ? (
