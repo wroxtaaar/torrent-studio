@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 const SEEDR_API_BASE = 'https://www.seedr.cc/api/v0.1/p';
 const SEEDR_MAX_SIZE_BYTES = Number(process.env.SEEDR_MAX_SIZE_GB || 5) * 1024 * 1024 * 1024;
 
@@ -37,7 +38,7 @@ function unwrapData(value: any): any {
 
 async function seedrRequest(
   path: string,
-  method: 'GET' | 'POST' | 'DELETE' = 'GET',
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
   body?: Record<string, unknown>
 ): Promise<any> {
   const token = getToken();
@@ -501,6 +502,27 @@ export async function deleteSeedrFile(fileId: string | number): Promise<void> {
 
 export async function deleteSeedrFolder(folderId: string | number): Promise<void> {
   await seedrRequest(`/fs/folder/${encodeURIComponent(String(folderId))}`, 'DELETE');
+}
+
+export async function getSeedrFolderDownload(folderId: string | number): Promise<{ url: string }> {
+  const archiveId = randomUUID();
+  const result = await seedrRequest(
+    `/download/archive/init/${archiveId}`,
+    'PUT',
+    { archive_arr: [{ type: 'folder', id: Number(folderId) }] }
+  );
+  const data = unwrapData(result);
+  const url = String(
+    data?.url ??
+    data?.download_url ??
+    data?.downloadUrl ??
+    data?.signed_url ??
+    data?.signedUrl ??
+    (typeof result === 'string' ? result : '')
+  );
+
+  if (!url) throw new Error('Seedr did not return a folder download URL');
+  return { url };
 }
 
 export function seedrMaxSizeBytes(): number {
