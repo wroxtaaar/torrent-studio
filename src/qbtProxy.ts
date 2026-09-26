@@ -1,7 +1,7 @@
 import bencode from 'bencode';
 import crypto from 'crypto';
 import type { Express, Request, Response, NextFunction } from 'express';
-import { addSeedrTask, canUseSeedr, getSeedrTaskStatus, isSeedrConfigured, seedrMaxSizeBytes } from './seedr.ts';
+import { addSeedrTask, canUseSeedr, getSeedrTaskStatus, getSeedrFileDownload, isSeedrConfigured, listSeedrLibrary, seedrMaxSizeBytes } from './seedr.ts';
 
 type QbtConfig = {
   baseUrl: string;
@@ -544,6 +544,37 @@ export function installQbtProxy(app: Express) {
       console.error('[SEEDR] Status check failed:', error?.message || error);
       return res.status(Number(error?.status) || 502).json({
         error: error?.message || 'Seedr status request failed'
+      });
+    }
+  });
+
+  app.get('/api/seedr/files', async (_req: Request, res: Response) => {
+    try {
+      if (!isSeedrConfigured()) {
+        return res.json({ configured: false, files: [] });
+      }
+      const files = await listSeedrLibrary();
+      return res.json({ configured: true, files });
+    } catch (error: any) {
+      console.error('[SEEDR] Library listing failed:', error?.message || error);
+      return res.status(Number(error?.status) || 502).json({
+        error: error?.message || 'Seedr library request failed'
+      });
+    }
+  });
+
+  app.get('/api/seedr/files/:fileId/download', async (req: Request, res: Response) => {
+    try {
+      const fileId = String(req.params.fileId || '').trim();
+      if (!fileId) return res.status(400).json({ error: 'fileId is required' });
+      if (!isSeedrConfigured()) return res.status(503).json({ error: 'Seedr is not configured' });
+
+      const result = await getSeedrFileDownload(fileId);
+      return res.json(result);
+    } catch (error: any) {
+      console.error('[SEEDR] File download link failed:', error?.message || error);
+      return res.status(Number(error?.status) || 502).json({
+        error: error?.message || 'Seedr download link request failed'
       });
     }
   });
