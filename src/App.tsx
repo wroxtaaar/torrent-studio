@@ -53,7 +53,7 @@ import {
 } from './types/index.ts';
 
 import { api } from './api/client.ts';
-import { formatBytes, formatSpeed } from './utils/formatters.ts';
+import { formatBytes, formatQuotaBytes, formatSpeed } from './utils/formatters.ts';
 import { dispatchBrowserNotification, playNotificationSound } from './utils/notifications.ts';
 
 import { TorrentCard } from './components/TorrentCard.tsx';
@@ -1335,7 +1335,7 @@ export default function App() {
                         <div className="rounded-lg bg-slate-900/80 border border-slate-800 px-3 py-2">
                           <div className="text-[10px] uppercase tracking-wide text-slate-500">Remaining</div>
                           <div className={`text-sm font-bold mt-0.5 ${seedrQuota.remainingSpace > 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
-                            {formatBytes(seedrQuota.remainingSpace)}
+                            {formatQuotaBytes(seedrQuota.remainingSpace)}
                           </div>
                         </div>
                         <div className="rounded-lg bg-slate-900/80 border border-slate-800 px-3 py-2">
