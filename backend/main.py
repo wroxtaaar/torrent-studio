@@ -401,17 +401,31 @@ async def torrents_add(body: dict[str, Any]):
     urls = str(body.get("urls") or "").strip()
     if not urls:
         raise HTTPException(400, "urls is required")
-    selected = body.get("selectedNames") or []
+
+    existing_hash = str(body.get("existingHash") or "").strip()
+    manifest = body.get("manifest") or []
+    selected_ids = [int(x) for x in (body.get("selectedFiles") or [])]
+
+    # Magnet inspection creates a stopped metadata-only torrent. Reuse that
+    # exact hash instead of adding the magnet again (which qBittorrent rejects
+    # with Conflict), apply the user's file selection, then resume it.
+    if existing_hash:
+        await qbt.set_file_priorities(existing_hash, manifest, selected_ids)
+        await qbt.resume(existing_hash)
+        return {
+            "backend": "qbittorrent",
+            "seedrTaskId": None,
+            "existingHash": existing_hash,
+            "selectedNames": body.get("selectedNames") or [],
+        }
+
     result = await qbt.add(
         urls,
         savepath="/downloads",
         autoTMM="false",
         category=body.get("category") or "Downloads",
     )
-    if body.get("selectedFiles") is not None and body.get("existingHash"):
-        ids = "|".join(str(x) for x in body["selectedFiles"])
-        await qbt.file_priority(str(body["existingHash"]), ids, 1)
-    return {"backend": "qbittorrent", "qbtResponse": result, "selectedNames": selected}
+    return {"backend": "qbittorrent", "qbtResponse": result, "selectedNames": body.get("selectedNames") or []}
 
 
 @app.post("/api/v2/torrents/inspect-magnet")
