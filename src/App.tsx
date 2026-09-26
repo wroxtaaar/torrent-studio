@@ -1360,36 +1360,6 @@ export default function App() {
               </div>
             )}
 
-            {/* Torrents List */}
-            {torrents.length === 0 ? (
-              <div className="py-16 text-center rounded-2xl bg-slate-900 border border-slate-800 p-8">
-                <Cloud className="w-12 h-12 text-slate-700 mx-auto mb-3" />
-                <h3 className="text-sm font-bold text-slate-300">No active torrent transfers</h3>
-                <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                  Paste any magnet link to start cloud downloading at high server speeds.
-                </p>
-                <button
-                  onClick={() => openAddMagnet()}
-                  className="mt-4 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-400 text-xs font-semibold transition"
-                >
-                  + Add First Magnet Link
-                </button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 gap-3">
-                {torrents.map((torrent) => (
-                  <TorrentCard
-                    key={torrent.hash}
-                    torrent={torrent}
-                    onPause={handlePauseTorrent}
-                    onResume={handleResumeTorrent}
-                    onDelete={handleDeleteTorrent}
-                    onSelectFiles={(t) => setPrioTorrent(t)}
-                    onStream={handleStreamTorrent}
-                  />
-                ))}
-              </div>
-            )}
           </div>
         )}
 
