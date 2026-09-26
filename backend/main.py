@@ -13,7 +13,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, quote, unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urljoin, urlsplit
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -1632,6 +1632,12 @@ async def _seedr_progress(task_id: str, task: dict[str, Any]) -> tuple[float, di
     try:
         result = _seedr_data(await seedr_request(f"/tasks/{quote(str(task_id))}/progress"))
         progress_url = ""
+        direct_progress = _seedr_progress_value(result)
+        if direct_progress is not None and direct_progress > 0:
+            # Some Seedr responses include the actual progress value directly,
+            # without requiring a second request to the polling URL.
+            return min(100, max(0, direct_progress)), {**task, **(result if isinstance(result, dict) else {})}
+
         if isinstance(result, str):
             # Seedr may return the polling URL directly as a JSON string.
             progress_url = result.strip().strip('"')
@@ -1642,7 +1648,16 @@ async def _seedr_progress(task_id: str, task: dict[str, Any]) -> tuple[float, di
                 or result.get("progressUrl")
                 or ""
             )
+
+        # The polling URL can be absolute, protocol-relative, or a relative
+        # path. Normalize it against the Seedr API base before requesting it.
         if progress_url:
+            if progress_url.startswith("//"):
+                progress_url = "https:" + progress_url
+            elif progress_url.startswith("/"):
+                progress_url = urljoin(SEEDR_BASE.rstrip("/") + "/", progress_url.lstrip("/"))
+            elif not re.match(r"^https?://", progress_url, re.IGNORECASE):
+                progress_url = urljoin(SEEDR_BASE.rstrip("/") + "/", progress_url)
             async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
                 response = await client.get(
                     progress_url,
