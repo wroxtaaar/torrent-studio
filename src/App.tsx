@@ -197,24 +197,43 @@ export default function App() {
     }
   }, [selectedSeedrFolderId, seedrFolderGroups]);
 
-  // Hide physical qBittorrent files from the cloud-file browser until their
-  // corresponding torrent file is actually complete. qBittorrent creates the
-  // destination file as soon as downloading starts, so scanning /downloads
-  // alone would make an active download look finished.
+  // While a torrent is downloading, show its physical files only inside
+  // the temporary torrent folder UI below. qBittorrent creates destination
+  // files immediately, so showing them in the normal file list would make an
+  // active download look like a standalone completed file.
+  const activeTorrentFolders = useMemo(() => (
+    torrents
+      .filter(torrent =>
+        torrent.state !== 'completed' &&
+        torrent.state !== 'error' &&
+        Array.isArray(torrent.files) &&
+        torrent.files.length > 0
+      )
+      .map(torrent => ({
+        ...torrent,
+        virtualPath: '/__active-torrent__/' + torrent.hash,
+      }))
+  ), [torrents]);
+
+  const activeTorrentFolder = useMemo(() => {
+    const prefix = '/__active-torrent__/';
+    if (!currentFolder.startsWith(prefix)) return null;
+    const hash = currentFolder.slice(prefix.length);
+    return activeTorrentFolders.find(torrent => torrent.hash === hash) || null;
+  }, [currentFolder, activeTorrentFolders]);
+
   const visibleFiles = useMemo(() => {
     return files.filter(file => {
-      const fileName = file.name.toLowerCase();
-      const isActiveIncomplete = torrents.some(torrent =>
+      const fileName = String(file.name || '').split('/').pop()?.toLowerCase() || '';
+      const belongsToActiveTorrent = activeTorrentFolders.some(torrent =>
         torrent.files?.some(torrentFile => {
           const torrentName = String(torrentFile.name || '').split('/').pop()?.toLowerCase() || '';
-          return torrentName === fileName &&
-            Number(torrentFile.progress ?? 0) < 0.999 &&
-            torrent.state !== 'completed';
+          return torrentName === fileName;
         })
       );
-      return !isActiveIncomplete;
+      return !belongsToActiveTorrent;
     });
-  }, [files, torrents]);
+  }, [files, activeTorrentFolders]);
 
   // File Explorer State
   const [currentFolder, setCurrentFolder] = useState<string>('/');
@@ -1747,62 +1766,143 @@ export default function App() {
               </div>
             </div>
 
-            {/* Folders and Files */}
-            {visibleFolders.length > 0 && (
-              <div className="grid grid-cols-1 gap-2.5">
-                {visibleFolders.map((folder) => (
+            {/* Active torrent folder view */}
+            {activeTorrentFolder ? (
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-900 border border-cyan-500/20">
                   <button
-                    key={folder.id}
                     type="button"
-                    onClick={() => setCurrentFolder(folder.path)}
-                    className="w-full p-3.5 rounded-2xl bg-slate-900 border border-slate-800 hover:border-cyan-500/40 hover:bg-slate-900/80 transition shadow-sm flex items-center gap-3 text-left group"
+                    onClick={() => setCurrentFolder('/')}
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition"
                   >
-                    <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/20 shrink-0">
-                      <Folder className="w-5 h-5 text-cyan-400" />
-                    </div>
-                    <div className="truncate flex-1">
-                      <h4 className="text-sm font-semibold text-slate-200 truncate group-hover:text-cyan-400 transition">
-                        {folder.name}
-                      </h4>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        {folder.filesCount || 0} files • {formatBytes(folder.totalSize || 0)}
-                      </p>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-cyan-400 shrink-0" />
+                    ← Back to files
                   </button>
-                ))}
+                  <div className="min-w-0 flex-1 text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <Folder className="w-4 h-4 text-cyan-400 shrink-0" />
+                      <span className="text-sm font-semibold text-slate-100 truncate">{activeTorrentFolder.name}</span>
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">
+                      Downloading • {Math.round((Number(activeTorrentFolder.progress) || 0) * 100)}% • {activeTorrentFolder.files.length} file{activeTorrentFolder.files.length === 1 ? '' : 's'}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-2.5">
+                  {activeTorrentFolder.files.map(file => (
+                    <div
+                      key={file.index}
+                      className="p-3 rounded-2xl bg-slate-900 border border-slate-800"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-slate-200 truncate">
+                            {String(file.name || '').split('/').pop() || file.name}
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            {formatBytes(file.size)} • {Number(file.progress || 0) >= 0.999 ? 'Complete' : (Number(file.progress || 0) * 100).toFixed(1) + '% downloaded'}
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-mono text-cyan-300 shrink-0">
+                          {formatBytes(Math.round(Number(file.size || 0) * Number(file.progress || 0)))} / {formatBytes(file.size)}
+                        </span>
+                      </div>
+                      <div className="mt-2 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-cyan-400 transition-all duration-700"
+                          style={{ width: Math.max(0, Math.min(100, Number(file.progress || 0) * 100)) + '%' }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
+            ) : (
+              <>
+                {/* Folders and Files */}
+                {visibleFolders.length > 0 || activeTorrentFolders.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-2.5">
+                    {activeTorrentFolders.map((torrent) => (
+                      <button
+                        key={'active-torrent-' + torrent.hash}
+                        type="button"
+                        onClick={() => setCurrentFolder(torrent.virtualPath)}
+                        className="w-full p-3.5 rounded-2xl bg-slate-900 border border-cyan-500/20 hover:border-cyan-500/40 hover:bg-slate-900/80 transition shadow-sm flex items-center gap-3 text-left group"
+                      >
+                        <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/20 shrink-0">
+                          <Folder className="w-5 h-5 text-cyan-400" />
+                        </div>
+                        <div className="truncate flex-1">
+                          <h4 className="text-sm font-semibold text-slate-200 truncate group-hover:text-cyan-400 transition">
+                            {torrent.name}
+                          </h4>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            Downloading • {Math.round((Number(torrent.progress) || 0) * 100)}% • {torrent.files.length} file{torrent.files.length === 1 ? '' : 's'} • {formatBytes(torrent.total_size || torrent.size || 0)}
+                          </p>
+                        </div>
+                        <span className="text-[10px] font-semibold text-cyan-300 shrink-0">Active</span>
+                        <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-cyan-400 shrink-0" />
+                      </button>
+                    ))}
+
+                    {visibleFolders
+                      .filter(folder => !activeTorrentFolders.some(torrent => torrent.name === folder.name))
+                      .map((folder) => (
+                        <button
+                          key={folder.id}
+                          type="button"
+                          onClick={() => setCurrentFolder(folder.path)}
+                          className="w-full p-3.5 rounded-2xl bg-slate-900 border border-slate-800 hover:border-cyan-500/40 hover:bg-slate-900/80 transition shadow-sm flex items-center gap-3 text-left group"
+                        >
+                          <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/20 shrink-0">
+                            <Folder className="w-5 h-5 text-cyan-400" />
+                          </div>
+                          <div className="truncate flex-1">
+                            <h4 className="text-sm font-semibold text-slate-200 truncate group-hover:text-cyan-400 transition">
+                              {folder.name}
+                            </h4>
+                            <p className="text-[11px] text-slate-500 mt-0.5">
+                              {folder.filesCount || 0} files • {formatBytes(folder.totalSize || 0)}
+                            </p>
+                          </div>
+                          <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-cyan-400 shrink-0" />
+                        </button>
+                      ))}
+                  </div>
+                ) : null}
+
+                {files.length > 0 && (
+                  <div className="grid grid-cols-1 gap-2.5">
+                    {visibleFiles.map((file) => (
+                      <FileCard
+                        key={file.id}
+                        file={file}
+                        onPlay={(f) => {
+                          setActiveMediaFile(f);
+                          setIsPlayerMinimized(false);
+                        }}
+                        onDelete={handleDeleteFile}
+                        onRename={(f) => setRenameItem({ id: f.id, name: f.name, isFolder: false })}
+                        onMove={(f) => setMoveFile(f)}
+                        canEdit={activeUser?.role !== 'viewer'}
+                        canDelete={activeUser?.role === 'admin'}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {visibleFolders.length === 0 && visibleFiles.length === 0 && activeTorrentFolders.length === 0 && (
+                  <div className="py-16 text-center rounded-2xl bg-slate-900 border border-slate-800 p-8">
+                    <Folder className="w-12 h-12 text-slate-700 mx-auto mb-3" />
+                    <h3 className="text-sm font-bold text-slate-300">No files found in this folder</h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Completed torrent downloads and uploaded media appear here instantly.
+                    </p>
+                  </div>
+                )}
+              </>
             )}
 
-            {files.length > 0 && (
-              <div className="grid grid-cols-1 gap-2.5">
-                {visibleFiles.map((file) => (
-                  <FileCard
-                    key={file.id}
-                    file={file}
-                    onPlay={(f) => {
-                      setActiveMediaFile(f);
-                      setIsPlayerMinimized(false);
-                    }}
-                    onDelete={handleDeleteFile}
-                    onRename={(f) => setRenameItem({ id: f.id, name: f.name, isFolder: false })}
-                    onMove={(f) => setMoveFile(f)}
-                    canEdit={activeUser?.role !== 'viewer'}
-                    canDelete={activeUser?.role === 'admin'}
-                  />
-                ))}
-              </div>
-            )}
-
-            {visibleFolders.length === 0 && visibleFiles.length === 0 && (
-              <div className="py-16 text-center rounded-2xl bg-slate-900 border border-slate-800 p-8">
-                <Folder className="w-12 h-12 text-slate-700 mx-auto mb-3" />
-                <h3 className="text-sm font-bold text-slate-300">No files found in this folder</h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  Completed torrent downloads and uploaded media appear here instantly.
-                </p>
-              </div>
-            )}
           </div>
         )}
 
