@@ -620,10 +620,14 @@ async def search_torrents(q: str = "", limit: int = 10):
 
     result = await prowlarr_search(query, limit)
 
-    cache[cache_key] = {
-        "cachedAt": now,
-        "results": result,
-    }
+    # Do not cache empty results. Indexers can temporarily return no
+    # results, and caching that response would make a later successful search
+    # look empty until the TTL expires.
+    if result:
+        cache[cache_key] = {
+            "cachedAt": now,
+            "results": result,
+        }
 
     # Keep the newest entries only so search caching cannot grow without
     # bounds. Expired entries are discarded while we trim the cache.
