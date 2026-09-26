@@ -111,6 +111,7 @@ export default function App() {
     taskId: number | string | null;
     name: string;
     folderName: string;
+    folderId: string;
     status: 'waiting' | 'downloading' | 'completed' | 'not_found';
     progress: number;
     downloadUrl: string | null;
@@ -136,6 +137,8 @@ export default function App() {
       return {
         taskId: parsed.taskId,
         name: String(parsed.name || 'Seedr download'),
+        folderName: String(parsed.folderName || ''),
+        folderId: String(parsed.folderId || ''),
         status: parsed.status === 'completed' ? 'completed' : parsed.status === 'downloading' ? 'downloading' : 'waiting',
         progress: Math.max(0, Math.min(100, Number(parsed.progress) || 0)),
         downloadUrl: typeof parsed.downloadUrl === 'string' ? parsed.downloadUrl : null,
@@ -207,11 +210,15 @@ export default function App() {
       }
     }
 
-    // Put the currently downloading Seedr task directly into the library as
-    // a folder row. This prevents a duplicate "Downloading with Seedr" card
-    // above the library and gives the folder row its live progress.
+    // Represent the active Seedr download as the same folder that Seedr
+    // created. If that folder already contains completed files, merge the
+    // active state into that existing folder instead of rendering two cards.
     if (seedrNotice?.taskId != null && seedrNotice.status !== 'completed') {
-      const activeFolderId = '__active_seedr__';
+      const actualFolderId =
+        seedrNotice.folderId?.trim() ||
+        seedrNotice.files.find(file => file.folderId && !file.folderId.startsWith('__'))?.folderId ||
+        '';
+
       const activeName =
         seedrNotice.folderName?.trim() ||
         seedrNotice.name?.trim() ||
@@ -221,21 +228,43 @@ export default function App() {
         id: file.id,
         name: file.name,
         size: file.size,
-        folderId: activeFolderId,
-        folderPath: '/Currently Downloading',
+        folderId: actualFolderId || file.folderId || '__active_seedr__',
+        folderPath: file.folderPath || '/Torrent Studio/' + activeName,
         downloadProgress: Number(seedrNotice.progress) || 0,
         downloading: true,
       }));
 
-      groups.set(activeFolderId, {
-        folderId: activeFolderId,
-        name: activeName,
-        path: '/Currently Downloading/' + activeName,
-        files: activeFiles,
-        totalSize: activeFiles.reduce((sum, file) => sum + file.size, 0),
-        active: true,
-        progress: Math.max(0, Math.min(100, Number(seedrNotice.progress) || 0)),
-      });
+      const matchingEntry = actualFolderId
+        ? groups.get(actualFolderId)
+        : Array.from(groups.values()).find(group =>
+            group.name.localeCompare(activeName, undefined, { sensitivity: 'base' }) === 0
+          );
+
+      if (matchingEntry) {
+        const liveIds = new Set(activeFiles.map(file => file.id));
+        matchingEntry.files = [
+          ...matchingEntry.files.filter(file => !liveIds.has(file.id)),
+          ...activeFiles
+        ];
+        matchingEntry.totalSize = matchingEntry.files.reduce((sum, file) => sum + file.size, 0);
+        matchingEntry.active = true;
+        matchingEntry.progress = Math.max(0, Math.min(100, Number(seedrNotice.progress) || 0));
+        if (actualFolderId) {
+          matchingEntry.folderId = actualFolderId;
+        }
+        matchingEntry.name = activeName || matchingEntry.name;
+      } else {
+        const syntheticFolderId = actualFolderId || '__active_seedr__';
+        groups.set(syntheticFolderId, {
+          folderId: syntheticFolderId,
+          name: activeName,
+          path: '/Torrent Studio/' + activeName,
+          files: activeFiles,
+          totalSize: activeFiles.reduce((sum, file) => sum + file.size, 0),
+          active: true,
+          progress: Math.max(0, Math.min(100, Number(seedrNotice.progress) || 0)),
+        });
+      }
     }
 
     return Array.from(groups.values()).sort((a, b) => {
@@ -583,6 +612,7 @@ export default function App() {
             return 'Waiting for Seedr metadata…';
           })(),
           folderName: String((result as any).seedrFolderName ?? '').trim(),
+          folderId: String((result as any).seedrFolderId ?? '').trim(),
           status: 'waiting',
           progress: 0,
           downloadUrl: null,
@@ -718,6 +748,11 @@ export default function App() {
               prev.folderName ??
               (result as any).name ??
               prev.name
+            ).trim(),
+            folderId: String(
+              (result as any).folderId ??
+              prev.folderId ??
+              ''
             ).trim(),
             status: completed ? 'completed' : result.status,
             progress: completed ? 100 : progress,
@@ -1532,7 +1567,7 @@ export default function App() {
                           <div className="flex items-center gap-2.5">
                             <button
                               type="button"
-                              onClick={() => !folder.active && folder.folderId !== '__root__' && setSelectedSeedrFolderId(folder.folderId)}
+                              onClick={() => folder.folderId !== '__root__' && folder.folderId !== '__active_seedr__' && setSelectedSeedrFolderId(folder.folderId)}
                               className="min-w-0 flex-1 text-left flex items-center gap-3"
                               disabled={folder.folderId === '__root__'}
                             >
@@ -1543,6 +1578,7 @@ export default function App() {
                                 <div className="truncate text-sm font-semibold text-slate-100">{folder.name}</div>
                                 <div className="text-[10px] text-slate-500 mt-0.5">
                                   {folder.files.length} file{folder.files.length === 1 ? '' : 's'} • {formatBytes(folder.totalSize)}
+                                  {folder.active && <span className="text-emerald-300"> • Downloading</span>}
                                 </div>
                                 {folder.active && (
                                   <div className="mt-1.5 flex items-center gap-2">
@@ -1558,7 +1594,7 @@ export default function App() {
                                   </div>
                                 )}
                               </div>
-                              {folder.folderId !== '__root__' && !folder.active && <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />}
+                              {folder.folderId !== '__root__' && folder.folderId !== '__active_seedr__' && <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />}
                             </button>
 
                             {folder.folderId !== '__root__' && !folder.active && (
