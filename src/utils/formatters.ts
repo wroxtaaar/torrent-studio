@@ -7,6 +7,20 @@ export function formatBytes(bytes: number, decimals = 2): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
+export function formatQuotaBytes(bytes: number): string {
+  if (!bytes || bytes <= 0) return '0 MB';
+  const gb = 1024 ** 3;
+  const mb = 1024 ** 2;
+
+  if (bytes >= gb) {
+    const wholeGb = Math.floor(bytes / gb);
+    const remainingMb = Math.round((bytes - wholeGb * gb) / mb);
+    return remainingMb > 0 ? `${wholeGb} GB ${remainingMb} MB` : `${wholeGb} GB`;
+  }
+
+  return `${Math.round(bytes / mb)} MB`;
+}
+
 export function formatSpeed(bytesPerSec: number): string {
   if (!bytesPerSec || bytesPerSec === 0) return '0 KB/s';
   if (bytesPerSec < 1024 * 1024) {
