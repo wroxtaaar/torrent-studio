@@ -1297,13 +1297,68 @@ async def seedr_quota():
     if not SEEDR_TOKEN:
         return {"configured": False, "maxSpace": 0, "usedSpace": 0, "remainingSpace": 0}
     result = _seedr_data(await seedr_request("/me/quota"))
-    storage = result.get("account", {}).get("storage", {}) if isinstance(result, dict) else {}
-    storage = storage or (result.get("storage", {}) if isinstance(result, dict) else {})
-    max_space = int(storage.get("limit") or storage.get("max_space") or storage.get("maxSpace") or (result.get("max_space") if isinstance(result, dict) else 0) or 0)
-    used_space = int(storage.get("used") or storage.get("used_space") or storage.get("usedSpace") or (result.get("used_space") if isinstance(result, dict) else 0) or 0)
-    if max_space <= 0 or used_space < 0 or used_space > max_space:
-        raise HTTPException(502, "Seedr quota information is temporarily unavailable")
-    return {"configured": True, "maxSpace": max_space, "usedSpace": used_space, "remainingSpace": max(0, max_space - used_space)}
+    # Seedr's v0.1 documentation defines this endpoint and purpose but does
+    # not guarantee a single response-field layout. Accept the common nested
+    # and flat quota layouts instead of converting an otherwise successful
+    # Seedr response into a 502.
+    if not isinstance(result, dict):
+        raise HTTPException(502, "Seedr returned an invalid quota response")
+
+    storage = result.get("account", {}).get("storage", {}) if isinstance(result.get("account"), dict) else {}
+    if not isinstance(storage, dict) or not storage:
+        storage = result.get("storage", {}) if isinstance(result.get("storage"), dict) else {}
+
+    def first_number(*values: Any) -> int:
+        for value in values:
+            try:
+                if value is None or value == "":
+                    continue
+                return max(0, int(float(value)))
+            except (TypeError, ValueError):
+                continue
+        return 0
+
+    max_space = first_number(
+        storage.get("limit"),
+        storage.get("max_space"),
+        storage.get("maxSpace"),
+        result.get("max_space"),
+        result.get("maxSpace"),
+        result.get("storage_limit"),
+        result.get("storageLimit"),
+        result.get("quota"),
+        result.get("space"),
+    )
+    used_space = first_number(
+        storage.get("used"),
+        storage.get("used_space"),
+        storage.get("usedSpace"),
+        result.get("used_space"),
+        result.get("usedSpace"),
+        result.get("storage_used"),
+        result.get("storageUsed"),
+    )
+
+    remaining_candidates = [
+        storage.get("remaining"),
+        storage.get("remaining_space"),
+        storage.get("remainingSpace"),
+        result.get("remaining_space"),
+        result.get("remainingSpace"),
+    ]
+    remaining_space = first_number(*remaining_candidates)
+
+    # Prefer an explicit remaining value when supplied. Otherwise derive it
+    # from limit-used when both are available.
+    if remaining_space == 0 and max_space > used_space:
+        remaining_space = max_space - used_space
+
+    return {
+        "configured": True,
+        "maxSpace": max_space,
+        "usedSpace": min(used_space, max_space) if max_space else used_space,
+        "remainingSpace": remaining_space,
+    }
 
 
 @app.post("/api/seedr/tasks/prepare")
