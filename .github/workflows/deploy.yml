@@ -14,12 +14,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy to Oracle VPS
+      - name: Wait for push burst to settle
+        run: |
+          set -euo pipefail
+          echo "Waiting 30 seconds for additional commits..."
+          sleep 30
+
+      - name: Deploy latest personal commit to Oracle VPS
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
           VPS_PROJECT_PATH: ${{ secrets.VPS_PROJECT_PATH }}
+          TRIGGER_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
 
@@ -31,14 +38,25 @@ jobs:
 
           ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
 
-          ssh -i ~/.ssh/id_ed25519 "$VPS_USER@$VPS_HOST" bash -s -- "$VPS_PROJECT_PATH" <<'REMOTE'
+          ssh -i ~/.ssh/id_ed25519 "$VPS_USER@$VPS_HOST" bash -s -- "$VPS_PROJECT_PATH" "$TRIGGER_SHA" <<'REMOTE'
           set -euo pipefail
 
           PROJECT_PATH="$1"
+          TRIGGER_SHA="$2"
           cd "$PROJECT_PATH"
 
           git fetch origin personal
-          git reset --hard origin/personal
+          LATEST_SHA="$(git rev-parse origin/personal)"
+
+          if [ "$LATEST_SHA" != "$TRIGGER_SHA" ]; then
+            echo "A newer commit arrived during the 30-second wait."
+            echo "Triggered by: $TRIGGER_SHA"
+            echo "Latest commit: $LATEST_SHA"
+            echo "Skipping this deployment; the latest workflow run will handle it."
+            exit 0
+          fi
+
+          git reset --hard "$LATEST_SHA"
 
           docker compose up -d --build --force-recreate
           docker compose ps
