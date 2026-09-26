@@ -320,6 +320,77 @@ export async function deleteSeedrTask(taskId: string | number): Promise<any> {
   return seedrRequest(`/tasks/${encodeURIComponent(String(taskId))}`, 'DELETE');
 }
 
+function unwantedBitmap(fileCount: number, unwantedIndexes: number[], msbFirst = false): string {
+  const bytes = Buffer.alloc(Math.ceil(Math.max(0, fileCount) / 8));
+  for (const rawIndex of unwantedIndexes) {
+    const index = Number(rawIndex);
+    if (!Number.isInteger(index) || index < 0 || index >= fileCount) continue;
+    const byteIndex = Math.floor(index / 8);
+    const bitIndex = index % 8;
+    bytes[byteIndex] |= 1 << (msbFirst ? 7 - bitIndex : bitIndex);
+  }
+  return bytes.toString('base64');
+}
+
+function decodeUnwantedBitmap(value: any, fileCount: number, msbFirst = false): number[] {
+  const encoded = typeof value === 'string' ? value : value?.unwanted;
+  if (!encoded) return [];
+  let bytes: Buffer;
+  try {
+    bytes = Buffer.from(String(encoded), 'base64');
+  } catch {
+    return [];
+  }
+
+  const unwanted: number[] = [];
+  for (let index = 0; index < fileCount; index++) {
+    const byteIndex = Math.floor(index / 8);
+    const bitIndex = index % 8;
+    const mask = 1 << (msbFirst ? 7 - bitIndex : bitIndex);
+    if ((bytes[byteIndex] & mask) !== 0) unwanted.push(index);
+  }
+  return unwanted;
+}
+
+async function getSeedrUnwanted(taskId: string | number): Promise<any> {
+  return seedrRequest(`/tasks/${encodeURIComponent(String(taskId))}/unwanted`);
+}
+
+export async function setSeedrUnwanted(
+  taskId: string | number,
+  fileCount: number,
+  unwantedIndexes: number[]
+): Promise<any> {
+  const wanted = new Set(unwantedIndexes.map(Number));
+  const requested = unwantedIndexes.filter(index => Number.isInteger(Number(index)));
+  const sendAndVerify = async (msbFirst: boolean) => {
+    const bitmap = unwantedBitmap(fileCount, requested, msbFirst);
+    await seedrRequest(
+      `/tasks/${encodeURIComponent(String(taskId))}/unwanted`,
+      'POST',
+      { unwanted: bitmap }
+    );
+
+    try {
+      const current = await getSeedrUnwanted(taskId);
+      const data = unwrapData(current);
+      const encoded = typeof data === 'string' ? data : data?.unwanted;
+      if (!encoded) return false;
+      const actual = decodeUnwantedBitmap(encoded, fileCount, msbFirst);
+      return actual.length === wanted.size && actual.every(index => wanted.has(index));
+    } catch {
+      // The endpoint accepted the write, but this API response cannot be
+      // verified. Leave the requested bitmap in place rather than guessing.
+      return true;
+    }
+  };
+
+  if (await sendAndVerify(false)) return { ok: true, unwanted: requested };
+  if (await sendAndVerify(true)) return { ok: true, unwanted: requested };
+
+  throw new Error('Seedr did not preserve the requested file selection');
+}
+
 export async function pauseSeedrTask(taskId: string | number): Promise<any> {
   return seedrRequest(`/tasks/${encodeURIComponent(String(taskId))}/pause`, 'POST');
 }
