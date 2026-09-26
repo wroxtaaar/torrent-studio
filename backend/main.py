@@ -990,7 +990,7 @@ async def torrent_file_path_for_hash(hash: str, index: int) -> Path:
     return torrent_file_path(torrents[0], index)
 
 
-# Seedr integration compatible with the working Node implementation.
+# Seedr integration compatible with the verified Seedr API.
 SEEDR_TOKEN = os.getenv("SEEDR_API_TOKEN", "").strip()
 SEEDR_BASE = "https://www.seedr.cc/api/v0.1/p"
 SEEDR_LIBRARY_FOLDER_ID = os.getenv("SEEDR_LIBRARY_FOLDER_ID", "").strip()
