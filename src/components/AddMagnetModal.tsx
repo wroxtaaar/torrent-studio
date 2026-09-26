@@ -36,8 +36,8 @@ interface AddMagnetModalProps {
     manifest?: { name: string; size: number; priority: number }[],
     existingHash?: string,
     forceBackend?: 'seedr' | 'qbittorrent',
-    selectedNames?: string[]
-  ) => Promise<void>;
+    selectedNames?: string[],
+     seedrTaskId?: number | string  ) => Promise<void>;
   defaultFolder?: string;
   initialMagnet?: string;
 }
