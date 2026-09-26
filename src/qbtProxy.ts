@@ -1,7 +1,7 @@
 import bencode from 'bencode';
 import crypto from 'crypto';
 import type { Express, Request, Response, NextFunction } from 'express';
-import { addSeedrTask, canUseSeedr, isSeedrConfigured, seedrMaxSizeBytes } from './seedr.ts';
+import { addSeedrTask, canUseSeedr, getSeedrTaskStatus, isSeedrConfigured, seedrMaxSizeBytes } from './seedr.ts';
 
 type QbtConfig = {
   baseUrl: string;
@@ -28,6 +28,7 @@ let qbtLoginPromise: Promise<void> | null = null;
 // the final step can always reuse the paused preview torrent instead of
 // attempting a second add (which qBittorrent correctly reports as Conflict).
 const previewTorrentHashes = new Map<string, { hash: string; expiresAt: number }>();
+const seedrJobs = new Map<string, { selectedNames: string[]; createdAt: number }>();
 
 function rememberPreviewTorrent(source: string, hash: string) {
   previewTorrentHashes.set(source, { hash, expiresAt: Date.now() + 30 * 60 * 1000 });
@@ -530,6 +531,23 @@ async function inspectMetadata(source: string) {
 }
 
 export function installQbtProxy(app: Express) {
+  app.get('/api/seedr/tasks/:taskId', async (req: Request, res: Response) => {
+    try {
+      const taskId = String(req.params.taskId || '').trim();
+      if (!taskId) return res.status(400).json({ error: 'taskId is required' });
+
+      const job = seedrJobs.get(taskId);
+      const result = await getSeedrTaskStatus(taskId, job?.selectedNames || []);
+      if (result.status === 'completed') seedrJobs.delete(taskId);
+      return res.json(result);
+    } catch (error: any) {
+      console.error('[SEEDR] Status check failed:', error?.message || error);
+      return res.status(Number(error?.status) || 502).json({
+        error: error?.message || 'Seedr status request failed'
+      });
+    }
+  });
+
   app.use('/api/v2', async (req: Request, res: Response, next: NextFunction) => {
     const route = req.path;
     const method = req.method.toUpperCase();
@@ -784,11 +802,18 @@ export function installQbtProxy(app: Express) {
             for (const [source, entry] of previewTorrentHashes) {
               if (entry.hash === previewHash) previewTorrentHashes.delete(source);
             }
-            console.log('[HYBRID] Seedr accepted torrent:', seedrTask?.user_torrent_id ?? seedrTask?.id ?? 'unknown');
+            const seedrTaskId = seedrTask?.user_torrent_id ?? seedrTask?.id ?? null;
+            if (seedrTaskId != null) {
+              seedrJobs.set(String(seedrTaskId), {
+                selectedNames: manifest.filter((_item: any, index: number) => selectedFiles.includes(index)).map((item: any) => String(item?.name || '')),
+                createdAt: Date.now(),
+              });
+            }
+            console.log('[HYBRID] Seedr accepted torrent:', seedrTaskId ?? 'unknown');
             return res.json({
               ok: true,
               backend: 'seedr',
-              seedrTaskId: seedrTask?.user_torrent_id ?? seedrTask?.id ?? null,
+              seedrTaskId: seedrTaskId,
               maxSizeBytes: seedrMaxSizeBytes(),
             });
           } catch (seedrError: any) {
