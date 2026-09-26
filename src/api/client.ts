@@ -90,6 +90,7 @@ export const api = {
     totalSize: number;
     source: string;
     pending?: boolean;
+    createdPreview?: boolean;
     message?: string;
   }> {
     const res = await fetch('/api/v2/torrents/inspect-magnet', {
