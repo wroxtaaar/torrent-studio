@@ -1154,10 +1154,14 @@ async def _seedr_find_task_by_hash(info_hash: str) -> dict[str, Any] | None:
             if not isinstance(task, dict):
                 continue
             nested = task.get("task") if isinstance(task.get("task"), dict) else {}
+            torrent_payload = task.get("torrent_payload") if isinstance(task.get("torrent_payload"), dict) else {}
+            nested_payload = nested.get("torrent_payload") if isinstance(nested.get("torrent_payload"), dict) else {}
             candidate = str(
-                task.get("torrent_hash")
+                torrent_payload.get("hash")
+                or task.get("torrent_hash")
                 or task.get("hash")
                 or task.get("info_hash")
+                or nested_payload.get("hash")
                 or nested.get("torrent_hash")
                 or nested.get("hash")
                 or nested.get("info_hash")
