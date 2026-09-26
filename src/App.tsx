@@ -503,7 +503,7 @@ export default function App() {
       }
 
       setSeedrError(null);
-      const result = await api.getSeedrFileStream(file.id, type);
+      const result = await api.getSeedrFileStream(file.name, type);
       const syntheticFile: StorageFile = {
         id: `seedr-${file.id}`,
         name: result.name || file.name,
@@ -530,17 +530,17 @@ export default function App() {
 
   const handleDeleteSeedrFile = async (file: { id: string; name: string; size: number; folderId: string; folderPath: string }) => {
     const confirmed = window.confirm(
-      `Delete "${file.name}" from Seedr? This permanently removes the file from your Seedr account.`
+      `Delete the Seedr folder containing "${file.name}"? This permanently removes the entire downloaded folder and its contents from Seedr.`
     );
     if (!confirmed) return;
 
     try {
-      await api.deleteSeedrFile(file.id);
-      setSeedrFiles(prev => prev.filter(item => item.id !== file.id));
+      await api.deleteSeedrFolder(file.folderId);
+      setSeedrFiles(prev => prev.filter(item => item.folderId !== file.folderId));
       setSeedrError(null);
     } catch (error) {
-      console.error('Failed to delete Seedr file:', error);
-      setSeedrError(error instanceof Error ? error.message : 'Failed to delete Seedr file');
+      console.error('Failed to delete Seedr folder:', error);
+      setSeedrError(error instanceof Error ? error.message : 'Failed to delete Seedr folder');
     }
   };
 
@@ -1060,8 +1060,8 @@ export default function App() {
                           type="button"
                           onClick={() => handleDeleteSeedrFile(file)}
                           className="p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200 transition"
-                          title="Delete from Seedr"
-                          aria-label={`Delete ${file.name} from Seedr`}
+                          title="Delete Seedr folder"
+                          aria-label={`Delete Seedr folder containing ${file.name}`}
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
