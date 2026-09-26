@@ -128,7 +128,6 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
 
     const file = files[0];
     const fileSize = Number(file.size || 0);
-    const SEEDR_SINGLE_FILE_LIMIT_BYTES = 5 * 1024 * 1024 * 1024;
 
     const manifest = [{
       name: file.name,
@@ -140,14 +139,14 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       setIsLoading(true);
       setError('');
 
-      // A single-file torrent needs no selection UI. Prefer Seedr when the
-      // file is below the free-account threshold and there is enough current
-      // Seedr space; otherwise send it directly to qBittorrent.
+      // A single-file torrent needs no selection UI. Use Seedr whenever
+      // the file fits in the currently available free-account space.
+      // There is no hard 5 GB cutoff: remaining quota is the limit.
       let forceBackend: 'seedr' | 'qbittorrent' = 'qbittorrent';
-      if (fileSize > 0 && fileSize < SEEDR_SINGLE_FILE_LIMIT_BYTES) {
+      if (fileSize > 0) {
         try {
           const quota = await api.getSeedrQuota();
-          if (quota.configured && quota.remainingSpace >= fileSize) {
+          if (quota.configured && fileSize < quota.remainingSpace) {
             forceBackend = 'seedr';
           }
         } catch {
