@@ -2007,12 +2007,21 @@ async def seedr_task(task_id: str):
     if not task_name:
         listed_task = await _seedr_task_from_list(task_id)
         if listed_task:
-            task = {**listed_task, **task}
+            # Keep live fields from /tasks/{id}, but fill missing display
+            # metadata from the transfer-list record. Do not merge the whole
+            # object in the opposite direction because the list can contain
+            # stale progress/state while the detail endpoint is live.
+            task = dict(task)
+            for key in ("name", "title", "torrent_name"):
+                if not str(task.get(key) or "").strip() and str(listed_task.get(key) or "").strip():
+                    task[key] = listed_task[key]
+
             if isinstance(raw_task, dict) and isinstance(raw_task.get("task"), dict):
-                task["task"] = {
-                    **listed_task,
-                    **raw_task.get("task"),
-                }
+                nested_task = dict(raw_task.get("task"))
+                for key in ("name", "title", "torrent_name"):
+                    if not str(nested_task.get(key) or "").strip() and str(listed_task.get(key) or "").strip():
+                        nested_task[key] = listed_task[key]
+                task["task"] = nested_task
 
     progress, task = await _seedr_progress(task_id, task)
     complete = _seedr_task_complete(task) or progress >= 100
