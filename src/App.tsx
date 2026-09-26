@@ -1438,27 +1438,27 @@ export default function App() {
                           key={folder.folderId}
                           className="rounded-xl bg-slate-900/80 border border-slate-800 px-3 py-3 hover:border-slate-700 transition"
                         >
-                          <button
-                            type="button"
-                            onClick={() => folder.folderId !== '__root__' && setSelectedSeedrFolderId(folder.folderId)}
-                            className="w-full text-left flex items-center gap-3"
-                            disabled={folder.folderId === '__root__'}
-                          >
-                            <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400 shrink-0">
-                              <Folder className="w-5 h-5" />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-sm font-semibold text-slate-100">{folder.name}</div>
-                              <div className="text-[10px] text-slate-500 mt-0.5">
-                                {folder.files.length} file{folder.files.length === 1 ? '' : 's'} • {formatBytes(folder.totalSize)}
+                          <div className="flex items-center gap-2.5">
+                            <button
+                              type="button"
+                              onClick={() => folder.folderId !== '__root__' && setSelectedSeedrFolderId(folder.folderId)}
+                              className="min-w-0 flex-1 text-left flex items-center gap-3"
+                              disabled={folder.folderId === '__root__'}
+                            >
+                              <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400 shrink-0">
+                                <Folder className="w-5 h-5" />
                               </div>
-                            </div>
-                            {folder.folderId !== '__root__' && <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />}
-                          </button>
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate text-sm font-semibold text-slate-100">{folder.name}</div>
+                                <div className="text-[10px] text-slate-500 mt-0.5">
+                                  {folder.files.length} file{folder.files.length === 1 ? '' : 's'} • {formatBytes(folder.totalSize)}
+                                </div>
+                              </div>
+                              {folder.folderId !== '__root__' && <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />}
+                            </button>
 
-                          <div className="flex items-center justify-end gap-1.5 mt-3 pt-2 border-t border-slate-800">
                             {folder.folderId !== '__root__' && (
-                              <>
+                              <div className="flex items-center gap-1.5 shrink-0">
                                 <button
                                   type="button"
                                   onClick={() => handleDownloadSeedrFolder(folder.folderId)}
@@ -1474,9 +1474,10 @@ export default function App() {
                                 >
                                   <Trash2 className="w-4 h-4" />
                                 </button>
-                              </>
+                              </div>
                             )}
                           </div>
+
                         </div>
                       ))}
                     </div>
