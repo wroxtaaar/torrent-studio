@@ -405,10 +405,12 @@ async def torrents_delete(body: dict[str, Any]):
 async def search_torrent_add(body: dict[str, Any]):
     source = str(body.get("source") or "").strip()
     info_hash = str(body.get("infoHash") or "").strip().lower()
-    size = int(body.get("size") or 0)
+    # Only an explicitly supplied selectedSize is allowed here. The aggregate
+    # search-result size must never be treated as the Seedr selection size.
+    selected_size = int(body.get("selectedSize") or 0)
 
-    if size <= 0:
-        return {"added": False, "reason": "unknown_size"}
+    if selected_size <= 0:
+        return {"added": False, "reason": "selection_required"}
 
     if info_hash and re.fullmatch(r"[a-f0-9]{40}", info_hash):
         seedr_magnet = f"magnet:?xt=urn:btih:{info_hash}"
@@ -434,7 +436,7 @@ async def search_torrent_add(body: dict[str, Any]):
     if remaining == 0:
         remaining = max(0, number(quota.get("space_max")) - number(quota.get("space_used")))
 
-    if size >= remaining:
+    if selected_size >= remaining:
         return {"added": False, "reason": "insufficient_space", "remainingSpace": remaining}
 
     normalized = _seedr_normalize_magnet(seedr_magnet)
