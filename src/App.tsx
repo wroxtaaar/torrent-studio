@@ -1536,24 +1536,22 @@ export default function App() {
                                 </span>
                               </div>
                               <div className="text-sm font-semibold text-slate-100 mt-1 truncate">
-                                {file ? file.name : seedrNotice.name}
+                                {file ? file.name : (seedrNotice.name || 'Seedr download')}
                               </div>
                               <div className="text-[10px] text-slate-500 mt-0.5">
                                 {file ? formatBytes(file.size) : 'Resolving torrent files'}
                               </div>
-                              {file && (
-                                <div className="mt-1.5 flex items-center gap-2 max-w-sm">
-                                  <div className="h-1.5 flex-1 rounded-full bg-slate-800 overflow-hidden">
-                                    <div
-                                      className="h-full rounded-full bg-emerald-400 transition-all duration-500"
-                                      style={{ width: Math.max(0, Math.min(100, Number(seedrNotice.progress) || 0)) + '%' }}
-                                    />
-                                  </div>
-                                  <span className="shrink-0 text-[10px] font-mono font-semibold text-emerald-300">
-                                    {Number(seedrNotice.progress).toFixed(2).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '')}%
-                                  </span>
+                              <div className="mt-1.5 flex items-center gap-2 max-w-sm">
+                                <div className="h-1.5 flex-1 rounded-full bg-slate-800 overflow-hidden">
+                                  <div
+                                    className="h-full rounded-full bg-emerald-400 transition-all duration-500"
+                                    style={{ width: Math.max(0, Math.min(100, Number(seedrNotice.progress) || 0)) + '%' }}
+                                  />
                                 </div>
-                              )}
+                                <span className="shrink-0 text-[10px] font-mono font-semibold text-emerald-300">
+                                  {Number(seedrNotice.progress).toFixed(2).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '')}%
+                                </span>
+                              </div>
                             </div>
 
                             <div className="shrink-0 flex items-center gap-2">
