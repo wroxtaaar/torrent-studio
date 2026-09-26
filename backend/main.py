@@ -842,9 +842,19 @@ async def search_torrents(q: str = "", limit: int = 10):
         cached_at = float(cached.get("cachedAt") or 0)
         cached_results = cached.get("results")
         if now - cached_at < SEARCH_CACHE_TTL_SECONDS and isinstance(cached_results, list):
-            searches = read_json(RECENT_SEARCHES_FILE, [])
-            write_json(RECENT_SEARCHES_FILE, [query] + [x for x in searches if x != query][:9])
-            return {"results": cached_results, "cached": True}
+            # Older cached entries predate the file-count enrichment. Refresh
+            # those searches once so the UI can populate file counts.
+            cache_has_file_counts = all(
+                isinstance(item, dict) and (
+                    item.get("fileCount") is not None
+                    or not item.get("downloadUrl")
+                )
+                for item in cached_results
+            )
+            if cache_has_file_counts:
+                searches = read_json(RECENT_SEARCHES_FILE, [])
+                write_json(RECENT_SEARCHES_FILE, [query] + [x for x in searches if x != query][:9])
+                return {"results": cached_results, "cached": True}
 
     result = await prowlarr_search(query, limit)
 
