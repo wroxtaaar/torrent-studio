@@ -1222,11 +1222,28 @@ def _seedr_normalize_magnet(magnet: str) -> str:
         elif len(btih_value) != 40 or not re.fullmatch(r"[A-Fa-f0-9]{40}", btih_value):
             return value
 
-        params["xt"] = [
-            f"urn:btih:{btih_value.lower()}" if i == btih_index else v
-            for i, v in enumerate(xt_values)
-        ]
-        return "magnet:?" + urlencode(params, doseq=True)
+        # Preserve the original query encoding for all non-xt parameters.
+        # In particular, don't percent-encode the ':' characters in
+        # urn:btih: again: some Seedr V2 deployments are stricter about the
+        # magnet parser than normal URL query parsers.
+        raw_parts = parsed.query.split("&") if parsed.query else []
+        rewritten_parts: list[str] = []
+        replaced = False
+        for part in raw_parts:
+            raw_key, separator, raw_value = part.partition("=")
+            key = unquote(raw_key).strip().lower()
+            decoded_value = unquote(raw_value).strip()
+            if key == "xt" and not replaced and re.fullmatch(
+                r"urn:btih:[A-Za-z0-9]{32,40}", decoded_value, re.IGNORECASE
+            ):
+                rewritten_parts.append(f"{raw_key or 'xt'}=urn:btih:{btih_value.lower()}")
+                replaced = True
+            else:
+                rewritten_parts.append(part if separator else raw_key)
+
+        if replaced:
+            return "magnet:?" + "&".join(rewritten_parts)
+        return value
     except Exception:
         return value
 
