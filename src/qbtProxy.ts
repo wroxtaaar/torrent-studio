@@ -1101,7 +1101,13 @@ export function installQbtProxy(app: Express) {
           }
 
           const infoHash = extractInfoHash(directMagnet);
-          let seedrTask: any = infoHash ? await findSeedrTaskByHash(infoHash) : null;
+          const requestedSeedrTaskId = String(body?.seedrTaskId || '').trim();
+          let seedrTask: any = requestedSeedrTaskId
+            ? await getSeedrTaskSelection(requestedSeedrTaskId).then(selection => ({
+                ...(selection.task || {}),
+                id: requestedSeedrTaskId,
+              })).catch(() => null)
+            : (infoHash ? await findSeedrTaskByHash(infoHash) : null);
           const selectedNames = Array.isArray(body.selectedNames)
             ? body.selectedNames.map((name: any) => String(name || '').split('/').pop()).filter(Boolean)
             : [];
@@ -1115,7 +1121,7 @@ export function installQbtProxy(app: Express) {
             seedrTask = await addSeedrTask(directMagnet);
           }
 
-          const seedrTaskId = seedrTask?.user_torrent_id ?? seedrTask?.id ?? null;
+          const seedrTaskId = requestedSeedrTaskId || seedrTask?.user_torrent_id || seedrTask?.id || null;
           if (seedrTaskId == null) {
             throw new Error('Seedr did not return a task ID');
           }
