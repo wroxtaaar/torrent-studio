@@ -455,14 +455,25 @@ async def torrents_add(body: dict[str, Any]):
 
         seedr_magnet = _seedr_normalize_magnet(urls)
         info_hash = _seedr_info_hash(seedr_magnet)
+
+        # qBittorrent metadata inspection already gives us the authoritative
+        # info hash. If the browser sends a transformed/truncated magnet when
+        # starting the actual Seedr download, rebuild a canonical magnet from
+        # that known hash instead of rejecting an otherwise valid torrent.
         if not info_hash:
-            source_text = str(urls or "").strip()
-            print(
-                "[SEEDR] magnet validation failed: "
-                f"starts_magnet={bool(re.match(r'^magnet:', source_text, re.IGNORECASE))} "
-                f"length={len(source_text)}"
-            )
-            raise HTTPException(400, "Seedr requires a valid magnet link with a BTIH info hash")
+            fallback_hash = str(existing_hash or "").strip().lower()
+            if re.fullmatch(r"[a-f0-9]{40}", fallback_hash):
+                info_hash = fallback_hash
+                seedr_magnet = f"magnet:?xt=urn:btih:{info_hash}"
+                print(f"[SEEDR] using inspected qBittorrent hash for Seedr: {info_hash}")
+            else:
+                source_text = str(urls or "").strip()
+                print(
+                    "[SEEDR] magnet validation failed: "
+                    f"starts_magnet={bool(re.match(r'^magnet:', source_text, re.IGNORECASE))} "
+                    f"length={len(source_text)}"
+                )
+                raise HTTPException(400, "Seedr requires a valid magnet link with a BTIH info hash")
         print(f"[SEEDR] normalized magnet hash={info_hash}")
         seedr_result = await _seedr_find_task_by_hash(info_hash)
         if not seedr_result:
