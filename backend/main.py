@@ -233,8 +233,92 @@ async def media_info(path: Path) -> dict[str, Any]:
 def file_response(path: Path, download: bool = False) -> FileResponse:
     if not path.is_file():
         raise HTTPException(404, "File not found")
-    headers = {"Content-Disposition": f'attachment; filename="{path.name}"'} if download else {}
+    headers = {"Accept-Ranges": "bytes"}
+    if download:
+        headers["Content-Disposition"] = f'attachment; filename="{path.name}"'
     return FileResponse(path, media_type=mime_for(path.name), headers=headers)
+
+
+_hls_jobs: dict[str, asyncio.Task[None]] = {}
+
+
+def hls_cache_dir(source: Path) -> Path:
+    stat = source.stat()
+    key = hashlib.sha256(
+        ("hls-v4-mpegts" + str(source) + str(stat.st_size) + str(stat.st_mtime_ns)).encode()
+    ).hexdigest()
+    return HLS_CACHE_DIR / key
+
+
+async def prepare_hls(source: Path) -> Path:
+    cache = hls_cache_dir(source)
+    playlist = cache / "index.m3u8"
+    first_segment = cache / "segment_00000.ts"
+    if playlist.exists() and first_segment.exists() and "#EXT-X-ENDLIST" in playlist.read_text(errors="ignore"):
+        return cache
+
+    cache.mkdir(parents=True, exist_ok=True)
+    job_key = str(cache)
+    job = _hls_jobs.get(job_key)
+    if job is None or job.done():
+        for item in cache.iterdir():
+            if item.is_file():
+                item.unlink(missing_ok=True)
+
+        async def run() -> None:
+            probe = await media_info(source)
+            streams = probe.get("streams", [])
+            video = next((s for s in streams if s.get("codec_type") == "video"), None)
+            audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
+            if not video:
+                raise RuntimeError("No video stream was found in this file.")
+
+            video_copy = str(video.get("codec_name", "")).lower() == "h264" and str(video.get("pix_fmt", "")).lower() in {"yuv420p", "yuvj420p"}
+            audio_copy = not audio or str(audio.get("codec_name", "")).lower() == "aac"
+            args = [
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(source),
+                "-map", "0:v:0",
+            ]
+            if audio:
+                args += ["-map", "0:a:0?"]
+            args += ["-c:v", "copy" if video_copy else "libx264"]
+            if not video_copy:
+                args += ["-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p", "-profile:v", "high", "-level:v", "4.1"]
+            if audio:
+                args += ["-c:a", "copy" if audio_copy else "aac"]
+                if not audio_copy:
+                    args += ["-b:a", "160k", "-ar", "48000"]
+            args += [
+                "-f", "hls", "-hls_time", "6", "-hls_playlist_type", "event",
+                "-hls_list_size", "0", "-hls_flags", "independent_segments+temp_file",
+                "-hls_segment_type", "mpegts", "-hls_segment_filename",
+                str(cache / "segment_%05d.ts"), str(playlist),
+            ]
+            proc = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                raise RuntimeError(stderr.decode(errors="replace")[-6000:] or "ffmpeg HLS generation failed")
+            if not playlist.exists() or not first_segment.exists():
+                raise RuntimeError("ffmpeg did not produce a complete HLS playlist.")
+
+        job = asyncio.create_task(run())
+        _hls_jobs[job_key] = job
+
+    try:
+        await asyncio.wait_for(asyncio.shield(job), timeout=25)
+    except asyncio.TimeoutError:
+        for _ in range(100):
+            if first_segment.exists():
+                return cache
+            await asyncio.sleep(0.25)
+        raise HTTPException(504, "Timed out waiting for the first HLS segment")
+    except Exception as exc:
+        _hls_jobs.pop(job_key, None)
+        raise HTTPException(500, str(exc)) from exc
+    finally:
+        if job.done():
+            _hls_jobs.pop(job_key, None)
+    return cache
 
 
 
@@ -479,7 +563,29 @@ async def file_subtitle(identifier: str, stream_index: int):
 
 @app.get("/api/files/hls/{identifier}/{asset}")
 async def file_hls(identifier: str, asset: str):
-    raise HTTPException(404, "HLS transcoding is not enabled in the Python migration yet")
+    if asset not in {"index.m3u8"} and not asset.startswith("segment_") or (asset.startswith("segment_") and not asset.endswith(".ts")):
+        raise HTTPException(400, "Invalid HLS asset")
+    source = find_local_file_by_id(identifier)
+    cache = await prepare_hls(source)
+    if asset == "index.m3u8":
+        playlist = (cache / asset).read_text(encoding="utf-8")
+        rewritten = []
+        for line in playlist.splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                stripped = f"/api/files/hls/{quote(identifier)}/{quote(Path(stripped).name)}"
+                rewritten.append(stripped)
+            elif 'URI="' in line:
+                import re
+                line = re.sub(r'URI="([^"]+)"', lambda m: f'URI="/api/files/hls/{quote(identifier)}/{quote(Path(m.group(1)).name)}"', line)
+                rewritten.append(line)
+            else:
+                rewritten.append(line)
+        return Response("\n".join(rewritten) + "\n", media_type="application/vnd.apple.mpegurl", headers={"Cache-Control": "no-store"})
+    segment = cache / Path(asset).name
+    if not segment.is_file():
+        raise HTTPException(404, "HLS segment not ready")
+    return FileResponse(segment, media_type="video/mp2t", headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
 @app.post("/api/files/zip")
