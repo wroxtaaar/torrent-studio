@@ -155,13 +155,19 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
         }
       }
 
+      const selectedBackend = seedrTaskId != null ? 'seedr' : forceBackend;
+      const seedrSource =
+        selectedBackend === 'seedr' && hash && /^[a-f0-9]{40}$/i.test(hash)
+          ? `magnet:?xt=urn:btih:${hash.toLowerCase()}`
+          : source;
+
       await onAdd(
-        source,
+        seedrSource,
         category,
         [Number(file.index)],
         manifest,
         hash || undefined,
-        seedrTaskId != null ? 'seedr' : forceBackend,
+        selectedBackend,
         undefined,
         seedrTaskId ?? undefined
       );
@@ -466,8 +472,15 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
         }
       }
 
+      const downloadSource =
+        selectedBackend === 'seedr' &&
+        inspectedHash &&
+        /^[a-f0-9]{40}$/i.test(inspectedHash)
+          ? `magnet:?xt=urn:btih:${inspectedHash.toLowerCase()}`
+          : magnetInput.trim();
+
       await onAdd(
-        magnetInput.trim(),
+        downloadSource,
         category,
         selectedFileIndexes,
         manifest,
