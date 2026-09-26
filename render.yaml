@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: seedflow-render
+    runtime: docker
+    branch: render-python-seedr
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: SEEDR_API_TOKEN
+        sync: false
+      - key: SEEDR_LIBRARY_FOLDER_ID
+        sync: false
