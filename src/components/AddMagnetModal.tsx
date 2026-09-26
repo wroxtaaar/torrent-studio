@@ -71,7 +71,6 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
   const [customFileCount, setCustomFileCount] = useState<number>(16);
   const [pasteManifestText, setPasteManifestText] = useState('');
   const [inspectedHash, setInspectedHash] = useState('');
-  const [inspectedSeedrTaskId, setInspectedSeedrTaskId] = useState<number | string | null>(null);
   const [backgroundMode, setBackgroundMode] = useState(false);
 
   const inspectTimeoutRef = useRef<any>(null);
@@ -85,7 +84,6 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       setMagnetInput('');
       setInspectedFiles([]);
       setInspectedHash('');
-      setInspectedSeedrTaskId(null);
       setInspectionSource('');
       setCopiedMagnet(false);
     }
@@ -191,7 +189,6 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       setBackgroundMode(true);
       setError('');
       setInspectedFiles([]);
-      setInspectedSeedrTaskId(null);
 
       // Always use qBittorrent for metadata inspection. This keeps the
       // Seedr task from starting before the user has selected files. Seedr
@@ -215,7 +212,6 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       if (data && Array.isArray(data.files) && data.files.length > 0) {
         const hash = String(data.hash || '').trim().toLowerCase();
         setInspectedHash(hash);
-        setInspectedSeedrTaskId(null);
          const resolvedSource =
            data.source === 'search_torrent_descriptor' && hash
              ? `magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(data.name || data.files[0]?.name || 'torrent')}`
@@ -312,7 +308,6 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     setError('');
     setInspectedFiles([]);
     setInspectedHash('');
-    setInspectedSeedrTaskId(null);
     setInspectionSource('');
     if (inspectTimeoutRef.current) clearTimeout(inspectTimeoutRef.current);
   };
