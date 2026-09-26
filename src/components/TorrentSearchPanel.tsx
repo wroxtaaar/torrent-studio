@@ -176,7 +176,7 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
             <input
               value={query}
               onFocus={() => {
-                if (recentSearches.length > 0) setShowRecentSearches(true);
+                if (!searched && recentSearches.length > 0) setShowRecentSearches(true);
               }}
               onChange={(e) => {
                 setQuery(e.target.value);
@@ -343,9 +343,6 @@ export const TorrentSearchPanel: React.FC<TorrentSearchPanelProps> = ({ onAdd })
 
                     <div className="flex flex-wrap items-center gap-3 mt-3 text-xs text-slate-400">
                       <span className="font-mono">{formatBytes(result.size)}</span>
-                      {result.fileCount != null && (
-                        <span>{result.fileCount} file{result.fileCount === 1 ? '' : 's'}</span>
-                      )}
                       <span className="flex items-center gap-1 text-emerald-400">
                         <Users className="w-3.5 h-3.5" />
                         {result.seeders} seeders
