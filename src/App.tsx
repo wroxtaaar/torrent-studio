@@ -153,6 +153,25 @@ export default function App() {
     return Array.from(groups.values()).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
   }, [seedrFiles]);
 
+  // Hide physical qBittorrent files from the cloud-file browser until their
+  // corresponding torrent file is actually complete. qBittorrent creates the
+  // destination file as soon as downloading starts, so scanning /downloads
+  // alone would make an active download look finished.
+  const visibleFiles = useMemo(() => {
+    return files.filter(file => {
+      const fileName = file.name.toLowerCase();
+      const isActiveIncomplete = torrents.some(torrent =>
+        torrent.files?.some(torrentFile => {
+          const torrentName = String(torrentFile.name || '').split('/').pop()?.toLowerCase() || '';
+          return torrentName === fileName &&
+            Number(torrentFile.progress ?? 0) < 0.999 &&
+            torrent.state !== 'completed';
+        })
+      );
+      return !isActiveIncomplete;
+    });
+  }, [files, torrents]);
+
   // File Explorer State
   const [currentFolder, setCurrentFolder] = useState<string>('/');
   const [fileSearch, setFileSearch] = useState<string>('');
@@ -1425,7 +1444,7 @@ export default function App() {
 
             {files.length > 0 && (
               <div className="grid grid-cols-1 gap-2.5">
-                {files.map((file) => (
+                {visibleFiles.map((file) => (
                   <FileCard
                     key={file.id}
                     file={file}
@@ -1443,7 +1462,7 @@ export default function App() {
               </div>
             )}
 
-            {visibleFolders.length === 0 && files.length === 0 && (
+            {visibleFolders.length === 0 && visibleFiles.length === 0 && (
               <div className="py-16 text-center rounded-2xl bg-slate-900 border border-slate-800 p-8">
                 <Folder className="w-12 h-12 text-slate-700 mx-auto mb-3" />
                 <h3 className="text-sm font-bold text-slate-300">No files found in this folder</h3>
