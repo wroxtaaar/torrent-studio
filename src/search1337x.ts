@@ -58,23 +58,23 @@ function parseSearchRows(html: string, category: string) {
     pageUrl: string;
   }> = [];
 
-  const rowRegex = /<tr[\\s\\S]*?<\\/tr>/gi;
+  const rowRegex = /<tr[\s\S]*?<\/tr>/gi;
   const rows = html.match(rowRegex) || [];
 
   for (const row of rows) {
     const pageMatch = row.match(
-      /<td[^>]*class=["'][^"']*coll-1\\s+name[^"']*["'][^>]*>[\\s\\S]*?<a[^>]+href=["'](\\/torrent\\/[^"']+)["'][^>]*>([\\s\\S]*?)<\\/a>/i
+      /<td[^>]*class=["'][^"']*coll-1\s+name[^"']*["'][^>]*>[\s\S]*?<a[^>]+href=["'](\/torrent\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/i
     );
     if (!pageMatch) continue;
 
     const seedMatch = row.match(
-      /<td[^>]*class=["'][^"']*coll-2\\s+seeds[^"']*["'][^>]*>([\\s\\S]*?)<\\/td>/i
+      /<td[^>]*class=["'][^"']*coll-2\s+seeds[^"']*["'][^>]*>([\s\S]*?)<\/td>/i
     );
     const leechMatch = row.match(
-      /<td[^>]*class=["'][^"']*coll-3\\s+leeches[^"']*["'][^>]*>([\\s\\S]*?)<\\/td>/i
+      /<td[^>]*class=["'][^"']*coll-3\s+leeches[^"']*["'][^>]*>([\s\S]*?)<\/td>/i
     );
     const sizeMatch = row.match(
-      /<td[^>]*class=["'][^"']*coll-4\\s+size[^"']*["'][^>]*>([\\s\\S]*?)(?:<span[^>]*class=["'][^"']*seeds[^"']*["'][^>]*>[\\s\\S]*?<\\/span>)?<\\/td>/i
+      /<td[^>]*class=["'][^"']*coll-4\s+size[^"']*["'][^>]*>([\s\S]*?)(?:<span[^>]*class=["'][^"']*seeds[^"']*["'][^>]*>[\s\S]*?<\/span>)?<\/td>/i
     );
 
     const title = decodeHtml(pageMatch[2]);
@@ -153,13 +153,13 @@ async function fetch1337xDetail(base: string, pagePath: string) {
     if (!response.ok) return null;
 
     const html = await response.text();
-    const magnetMatch = html.match(/href=["'](magnet:\\?\\?[^"']+)["']/i);
+    const magnetMatch = html.match(/href=["'](magnet:\?[^"']+)["']/i);
     if (!magnetMatch) return null;
 
     const magnet = decodeHtml(magnetMatch[1]);
-    if (!/^magnet:\\?/i.test(magnet)) return null;
+    if (!/^magnet:\?/i.test(magnet)) return null;
 
-    const dateMatch = html.match(/Date uploaded\\s*[:<\\/\\s]*([A-Za-z0-9.,'\\- ]{4,40})/i);
+    const dateMatch = html.match(/Date uploaded\s*[:<\/\s]*([A-Za-z0-9.,'\- ]{4,40})/i);
 
     return {
       magnetUrl: magnet,
@@ -176,7 +176,7 @@ async function fetch1337xDetail(base: string, pagePath: string) {
 function queryTokens(query: string): string[] {
   return query
     .toLowerCase()
-    .split(/\\s+/)
+    .split(/\s+/)
     .map(token => token.trim())
     .filter(Boolean)
     .filter(token => !['the', 'a', 'an', 'of', 'and'].includes(token));
