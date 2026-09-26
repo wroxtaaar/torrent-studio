@@ -24,13 +24,45 @@ export type SeedrQuota = {
 };
 
 export async function getSeedrQuota(): Promise<SeedrQuota> {
-  const result = await seedrRequest('/me/quota');
-  const data = unwrapData(result);
-  const maxSpace = Number(data?.max_space ?? data?.maxSpace ?? data?.storage?.max ?? data?.quota?.max_space ?? 0);
-  const usedSpace = Number(data?.used_space ?? data?.usedSpace ?? data?.storage?.used ?? data?.quota?.used_space ?? 0);
-  const remainingSpace = Math.max(0, maxSpace - usedSpace);
+  // /me/quota is the documented quota endpoint, but Seedr's current API
+  // has returned stale/incomplete storage values there for some accounts.
+  // Library/search responses also expose the live max_space/used_space values,
+  // so use those as a fallback before declaring the account full.
+  try {
+    const result = await seedrRequest('/me/quota');
+    const data = unwrapData(result);
+    const maxSpace = Number(data?.max_space ?? data?.maxSpace ?? data?.storage?.max ?? data?.quota?.max_space ?? 0);
+    const usedSpace = Number(data?.used_space ?? data?.usedSpace ?? data?.storage?.used ?? data?.quota?.used_space ?? 0);
 
-  return { maxSpace, usedSpace, remainingSpace };
+    if (maxSpace > 0 && usedSpace >= 0 && usedSpace <= maxSpace) {
+      return {
+        maxSpace,
+        usedSpace,
+        remainingSpace: Math.max(0, maxSpace - usedSpace),
+      };
+    }
+  } catch {
+    // Fall through to the live library metadata fallback.
+  }
+
+  try {
+    const result = await seedrRequest('/fs/root/contents');
+    const data = unwrapData(result);
+    const maxSpace = Number(data?.max_space ?? data?.maxSpace ?? 0);
+    const usedSpace = Number(data?.used_space ?? data?.usedSpace ?? 0);
+
+    if (maxSpace > 0 && usedSpace >= 0 && usedSpace <= maxSpace) {
+      return {
+        maxSpace,
+        usedSpace,
+        remainingSpace: Math.max(0, maxSpace - usedSpace),
+      };
+    }
+  } catch {
+    // Preserve the original quota error if both sources are unavailable.
+  }
+
+  throw new Error('Seedr quota information is temporarily unavailable');
 }
 
 function getStatus(error: unknown): number | undefined {
