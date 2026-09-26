@@ -3,7 +3,7 @@ WORKDIR /app
 
 COPY package*.json ./
 RUN npm ci
-RUN npm install --no-save webtorrent@3.0.21
+RUN npm install --no-save --package-lock=false webtorrent@3.0.21
 
 COPY . .
 RUN npm run build
