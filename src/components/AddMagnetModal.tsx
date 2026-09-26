@@ -161,21 +161,33 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       setBackgroundMode(true);
       setError('');
       setInspectedFiles([]);
-      setInspectionSource('Adding torrent paused and waiting for qBittorrent metadata...');
+       setInspectionSource(
+         isSearchGrab
+           ? 'Loading torrent metadata...'
+           : 'Adding torrent paused and waiting for qBittorrent metadata...'
+       );
 
       const data = await api.inspectMagnet(source, category);
 
       if (data && Array.isArray(data.files) && data.files.length > 0) {
         const hash = String(data.hash || '').trim().toLowerCase();
         setInspectedHash(hash);
+         const resolvedSource =
+           data.source === 'search_torrent_descriptor' && hash
+             ? `magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(data.name || data.files[0]?.name || 'torrent')}`
+             : source;
+
+         if (resolvedSource !== source) {
+           setMagnetInput(resolvedSource);
+         }
         applyFileList(data.files);
 
         if (data.files.length === 1) {
-          await startSingleFileDownload(source, data.files, hash);
+           await startSingleFileDownload(resolvedSource, data.files, hash);
           return;
         }
 
-        setInspectionSource('✓ qBittorrent metadata loaded • Multi-file torrent stays paused while you choose files');
+         setInspectionSource(isSearchGrab ? '✓ Torrent metadata loaded • Multi-file torrent stays paused while you choose files' : '✓ qBittorrent metadata loaded • Multi-file torrent stays paused while you choose files');
         return;
       }
 
