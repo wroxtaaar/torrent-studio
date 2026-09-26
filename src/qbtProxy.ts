@@ -998,7 +998,47 @@ export function installQbtProxy(app: Express) {
         const selectedFiles = Array.isArray(body.selectedFiles) ? body.selectedFiles.map(Number) : [];
         const manifest = Array.isArray(body.manifest) ? body.manifest : [];
 
-        // Selection is mandatory. Keep the existing behavior for both backends.
+        // A magnet pasted directly into the Add Magnet dialog does not need
+        // qBittorrent metadata inspection. Send it straight to Seedr and return
+        // Seedr's original task response so the UI can show what Seedr accepted.
+        if (forceBackend === 'seedr') {
+          if (!isSeedrConfigured()) {
+            return res.status(503).json({
+              error: 'Seedr is not configured on the server.'
+            });
+          }
+
+          const directMagnet = /^magnet:\?/i.test(urls)
+            ? urls
+            : (/^[a-f0-9]{40}$/i.test(urls)
+              ? `magnet:?xt=urn:btih:${urls.toLowerCase()}`
+              : '');
+
+          if (!directMagnet) {
+            return res.status(400).json({
+              error: 'Direct Seedr mode requires a magnet link or 40-character torrent hash.'
+            });
+          }
+
+          const infoHash = extractInfoHash(directMagnet);
+          let seedrTask: any = infoHash ? await findSeedrTaskByHash(infoHash) : null;
+          if (!seedrTask) {
+            seedrTask = await addSeedrTask(directMagnet);
+          }
+
+          const seedrTaskId = seedrTask?.user_torrent_id ?? seedrTask?.id ?? null;
+          console.log('[SEEDR-DIRECT] Seedr response:', JSON.stringify(seedrTask));
+
+          return res.json({
+            ok: true,
+            backend: 'seedr',
+            seedrTaskId,
+            seedrResponse: seedrTask,
+          });
+        }
+
+        // Selection is mandatory for metadata-driven qBittorrent flow and
+        // hybrid Seedr flow that already has a manifest.
         if (!manifest.length || !selectedFiles.length) {
           return res.status(400).json({
             error: 'File selection is required. Select at least one file before starting the torrent.'
