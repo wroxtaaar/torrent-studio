@@ -218,8 +218,9 @@ class QBitClient:
                 category=category,
             )
 
-        for _ in range(60):
-            await asyncio.sleep(1)
+        for attempt in range(60):
+            # Poll aggressively while metadata is likely to arrive, then back off.
+            await asyncio.sleep(0.25 if attempt < 16 else 0.5)
 
             if info_hash:
                 torrents = await self.json(
