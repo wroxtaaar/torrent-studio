@@ -140,6 +140,7 @@ export default function App() {
   const [seedrLoading, setSeedrLoading] = useState(false);
   const [seedrError, setSeedrError] = useState<string | null>(null);
   const [seedrDeleteNotice, setSeedrDeleteNotice] = useState<string | null>(null);
+  const [seedrAddBlockedNotice, setSeedrAddBlockedNotice] = useState<string | null>(null);
   const [selectedSeedrFolderId, setSelectedSeedrFolderId] = useState<string | null>(() => {
     try {
       return window.localStorage.getItem('seedflow_seedr_folder') || null;
@@ -293,6 +294,24 @@ export default function App() {
     } catch {}
   }, [theme]);
 
+  const seedrDownloadActive = Boolean(
+    seedrNotice?.taskId != null && seedrNotice.status !== 'completed'
+  );
+
+  const openAddMagnet = useCallback((source = '') => {
+    if (seedrDownloadActive) {
+      setSeedrAddBlockedNotice(
+        'A Seedr download is already in progress. Free Seedr accounts allow one parallel download. Wait for it to finish before adding another magnet link.'
+      );
+      setActiveTab('transfers');
+      window.setTimeout(() => setSeedrAddBlockedNotice(null), 5000);
+      return;
+    }
+
+    setInitialMagnet(source);
+    setIsAddMagnetOpen(true);
+  }, [seedrDownloadActive]);
+
   // Load all initial system data
   const loadInitialData = useCallback(async () => {
     try {
@@ -417,8 +436,7 @@ export default function App() {
 
   // Actions
   const handleSearchAdd = (source: string) => {
-    setInitialMagnet(source);
-    setIsAddMagnetOpen(true);
+    openAddMagnet(source);
   };
 
   const handleAddMagnet = async (
@@ -430,6 +448,14 @@ export default function App() {
     forceBackend?: 'qbittorrent'
   ) => {
     try {
+      if (seedrDownloadActive && forceBackend !== 'qbittorrent') {
+        const error = new Error(
+          'A Seedr download is already in progress. Free Seedr accounts allow one parallel download. Wait for it to finish before adding another magnet link.'
+        );
+        (error as any).code = 'SEEDR_PARALLEL_DOWNLOAD_LIMIT';
+        throw error;
+      }
+
       const result = await api.addMagnet(magnet, category, selectedFiles, manifest, existingHash, forceBackend);
       if (result.backend === 'seedr') {
         setSeedrNotice({
@@ -978,10 +1004,7 @@ export default function App() {
           <div className="flex items-center gap-2">
             {/* "+ Add Magnet" Primary CTA */}
             <button
-              onClick={() => {
-                setInitialMagnet('');
-                setIsAddMagnetOpen(true);
-              }}
+              onClick={() => openAddMagnet()}
               className="px-3 sm:px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 text-xs sm:text-sm font-bold flex items-center gap-1.5 shadow-lg shadow-cyan-500/20 transition tap-target"
             >
               <Plus className="w-4 h-4 stroke-[3]" />
@@ -1114,6 +1137,16 @@ export default function App() {
           </div>
         )}
 
+        {seedrAddBlockedNotice && (
+          <div className="mb-4 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-start gap-2.5 shadow-lg">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <div className="font-bold text-amber-300">Cannot add another Seedr download</div>
+              <div className="mt-0.5 text-amber-200/80">{seedrAddBlockedNotice}</div>
+            </div>
+          </div>
+        )}
+
         {/* TAB 0: TORRENT SEARCH
             Keep this component mounted when switching tabs so an in-flight
             search continues in the background and its results remain available
@@ -1191,7 +1224,7 @@ export default function App() {
 
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setIsAddMagnetOpen(true)}
+                  onClick={() => openAddMagnet()}
                   className="px-3.5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-md shadow-cyan-500/20 transition"
                 >
                   <Plus className="w-4 h-4" />
@@ -1243,7 +1276,7 @@ export default function App() {
                   Paste any magnet link to start cloud downloading at high server speeds.
                 </p>
                 <button
-                  onClick={() => setIsAddMagnetOpen(true)}
+                  onClick={() => openAddMagnet()}
                   className="mt-4 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-400 text-xs font-semibold transition"
                 >
                   + Add First Magnet Link
@@ -1833,7 +1866,7 @@ export default function App() {
 
       {/* Mobile Floating Action Button (FAB) for Add Magnet */}
       <button
-        onClick={() => setIsAddMagnetOpen(true)}
+        onClick={() => openAddMagnet()}
         className="md:hidden fixed right-4 bottom-20 z-30 p-4 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 shadow-xl shadow-cyan-500/30 flex items-center justify-center font-bold"
         title="Add Magnet Link"
       >
@@ -1945,7 +1978,7 @@ export default function App() {
           setInitialMagnet('');
         }}
         onOpen={() => {
-          setIsAddMagnetOpen(true);
+          openAddMagnet();
         }}
         onAdd={handleAddMagnet}
         defaultFolder={currentFolder === '/' ? 'Downloads' : currentFolder.replace('/', '')}
