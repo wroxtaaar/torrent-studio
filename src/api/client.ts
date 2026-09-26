@@ -193,7 +193,7 @@ export const api = {
     forceBackend?: 'seedr' | 'qbittorrent',
     selectedNames?: string[],
     seedrTaskId?: number | string
-  ): Promise<{ backend?: 'seedr' | 'qbittorrent'; seedrTaskId?: number | null; seedrResponse?: any; seedrFolderName?: string | null }> {
+  ): Promise<{ backend?: 'seedr' | 'qbittorrent'; seedrTaskId?: number | null; seedrResponse?: any; seedrFolderName?: string | null; seedrFolderId?: string | null }> {
     const res = await fetch('/api/v2/torrents/add', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -315,6 +315,7 @@ export const api = {
     taskId: number | string;
     name?: string;
     folderName?: string;
+    folderId?: string;
     status: 'waiting' | 'downloading' | 'completed' | 'not_found';
     progress: number;
     downloadUrl: string | null;
