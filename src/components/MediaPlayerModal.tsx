@@ -20,6 +20,7 @@ import {
   Minimize2,
   Maximize2
 } from 'lucide-react';
+import Hls from 'hls.js';
 import { StorageFile } from '../types/index.ts';
 import { formatBytes, formatDuration } from '../utils/formatters.ts';
 
@@ -108,8 +109,32 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
     };
 
     media.addEventListener('loadedmetadata', handleLoaded, { once: true });
-    media.src = streamUrl;
-    media.load();
+
+    let hls: Hls | null = null;
+    const isHlsStream = /\\.m3u8(?:$|\\?)/i.test(streamUrl);
+
+    if (isHlsStream && isVideo && Hls.isSupported()) {
+      hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+      });
+      hls.loadSource(streamUrl);
+      hls.attachMedia(media as HTMLMediaElement);
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (data?.fatal) {
+          setMediaError(data?.details || 'Unable to play the HLS stream.');
+          setTrackNotice('');
+          hls?.destroy();
+          hls = null;
+        }
+      });
+    } else if (isHlsStream && isVideo && media.canPlayType('application/vnd.apple.mpegurl')) {
+      media.src = streamUrl;
+      media.load();
+    } else {
+      media.src = streamUrl;
+      media.load();
+    }
 
     if (!isVideo) {
       media.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
@@ -117,6 +142,7 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
 
     return () => {
       media.removeEventListener('loadedmetadata', handleLoaded);
+      hls?.destroy();
       media.pause();
       media.removeAttribute('src');
       media.load();
