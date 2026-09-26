@@ -20,8 +20,11 @@ COPY --from=build /app/package*.json ./
 # tsx is a devDependency but is the runtime for server.ts in this image.
 # Install dev dependencies in the runtime image so startup does not invoke
 # npx to download tsx on every container restart.
-RUN npm ci --include=dev
-RUN npm install --no-save webtorrent@3.0.21
+RUN npm ci --include=dev --include=optional
+# Oracle's VPS is ARM64. Install esbuild's platform binary explicitly so
+# tsx can start reliably even if npm skips an optional platform dependency.
+RUN npm install --no-save --include=optional @esbuild/linux-arm64
+RUN npm install --no-save --include=optional webtorrent@3.0.21
 
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/server.ts ./server.ts
