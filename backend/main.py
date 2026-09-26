@@ -1558,6 +1558,59 @@ async def _seedr_task(task_id: str) -> Any:
     return await seedr_request(f"/tasks/{quote(str(task_id))}")
 
 
+async def _seedr_folder_name(folder_id: str) -> str:
+    """Resolve the actual Seedr-created folder name from filesystem metadata."""
+    folder_id = str(folder_id or "").strip()
+    if not folder_id:
+        return ""
+
+    try:
+        payload = _seedr_data(
+            await seedr_request(f"/fs/folder/{quote(folder_id)}/contents")
+        )
+    except HTTPException:
+        return ""
+
+    def find_name(value: Any) -> str:
+        if isinstance(value, dict):
+            # Prefer metadata belonging to the requested folder.
+            for key in ("folder", "directory", "folder_info", "folderInfo"):
+                child = value.get(key)
+                if isinstance(child, dict):
+                    child_id = str(
+                        child.get("id")
+                        or child.get("folder_id")
+                        or child.get("folderId")
+                        or ""
+                    ).strip()
+                    if not child_id or child_id == folder_id:
+                        for name_key in ("name", "title", "folder_name", "folderName", "path"):
+                            name = str(child.get(name_key) or "").strip()
+                            if name:
+                                return Path(name.rstrip("/")).name
+
+            for key in ("name", "folder_name", "folderName", "title", "path"):
+                name = str(value.get(key) or "").strip()
+                if name and not name.lower().startswith(("http://", "https://")):
+                    return Path(name.rstrip("/")).name
+
+            # Some responses nest the folder metadata under data/items.
+            for child in value.values():
+                found = find_name(child)
+                if found:
+                    return found
+
+        elif isinstance(value, list):
+            for child in value:
+                found = find_name(child)
+                if found:
+                    return found
+
+        return ""
+
+    return find_name(payload)
+
+
 async def _seedr_task_from_list(task_id: str) -> dict[str, Any]:
     """Find a task anywhere in Seedr's transfer-list response.
 
@@ -2012,7 +2065,7 @@ async def seedr_task(task_id: str):
             # object in the opposite direction because the list can contain
             # stale progress/state while the detail endpoint is live.
             task = dict(task)
-            for key in ("name", "title", "torrent_name"):
+            for key in ("name", "title", "torrent_name", "folder_created_id"):
                 if not str(task.get(key) or "").strip() and str(listed_task.get(key) or "").strip():
                     task[key] = listed_task[key]
 
@@ -2030,7 +2083,12 @@ async def seedr_task(task_id: str):
         or task.get("title")
         or task.get("torrent_name")
         or ""
-    )
+    ).strip()
+
+    folder_id = str(task.get("folder_created_id") or "").strip()
+    folder_name = await _seedr_folder_name(folder_id) if folder_id else ""
+    if not folder_name:
+        folder_name = name
 
     # Seedr can expose filesystem entries before the overall torrent is done.
     # Return those entries while the task is still downloading so the UI can
@@ -2074,6 +2132,7 @@ async def seedr_task(task_id: str):
         return {
             "taskId": task_id,
             "name": name,
+            "folderName": folder_name,
             "status": "downloading",
             "progress": min(progress, 99.9),
             "task": task,
@@ -2095,6 +2154,7 @@ async def seedr_task(task_id: str):
     return {
         "taskId": task_id,
         "name": name,
+        "folderName": folder_name,
         "status": "completed",
         "progress": 100,
         "task": task,
@@ -2109,7 +2169,7 @@ async def seedr_files():
         return {"configured": False, "files": []}
     if not SEEDR_LIBRARY_FOLDER_ID.isdigit():
         return {"configured": True, "files": []}
-    folder_ids = [SEEDR_LIBRARY_FOLDER_ID]
+    folder_targets: list[tuple[str, str]] = [(SEEDR_LIBRARY_FOLDER_ID, "/Torrent Studio")]
     try:
         tasks = _seedr_array(await seedr_request("/tasks"), ("tasks", "torrents"))
         for raw in tasks:
@@ -2118,15 +2178,25 @@ async def seedr_files():
                 continue
             if not _seedr_task_complete(task):
                 continue
-            created = str(task.get("folder_created_id") or "")
+            created = str(task.get("folder_created_id") or "").strip()
             if created:
-                folder_ids.append(created)
+                folder_name = await _seedr_folder_name(created)
+                task_name = str(
+                    task.get("name")
+                    or task.get("title")
+                    or task.get("torrent_name")
+                    or ""
+                ).strip()
+                display_name = folder_name or task_name or created
+                folder_targets.append(
+                    (created, "/Torrent Studio/" + display_name)
+                )
     except Exception:
         pass
     files: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for folder_id in dict.fromkeys(folder_ids):
-        for item in await _seedr_collect(folder_id, "/Torrent Studio"):
+    for folder_id, folder_path in dict.fromkeys(folder_targets):
+        for item in await _seedr_collect(folder_id, folder_path):
             key = item["id"] or f'{item["folderId"]}:{item["folderPath"]}:{item["name"]}'
             if key not in seen:
                 seen.add(key)
