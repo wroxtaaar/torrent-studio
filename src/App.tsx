@@ -495,31 +495,50 @@ export default function App() {
     if (!seedrNotice?.taskId || seedrNotice.status === 'completed') return;
 
     let active = true;
+    let timeoutId: number | null = null;
+
+    const scheduleNextPoll = (delayMs: number) => {
+      if (!active) return;
+      timeoutId = window.setTimeout(poll, delayMs);
+    };
+
     const poll = async () => {
+      if (!active) return;
+
       try {
         const result = await api.getSeedrTask(seedrNotice.taskId!);
         if (!active) return;
+
+        const progress = Number(result.progress) || 0;
+        const completed = result.status === 'completed' || progress >= 100;
+
         setSeedrNotice(prev => {
           if (!prev) return null;
-          const completed = result.status === 'completed' || Number(result.progress) >= 100;
           return {
             ...prev,
             status: completed ? 'completed' : result.status,
-            progress: completed ? 100 : result.progress,
+            progress: completed ? 100 : progress,
             downloadUrl: result.downloadUrl,
             files: result.files || [],
           };
         });
+
+        if (!completed) {
+          // Keep API traffic modest on the free Seedr plan. Poll normally
+          // every 5 seconds, then increase responsiveness near completion.
+          scheduleNextPoll(progress >= 90 ? 2000 : 5000);
+        }
       } catch {
-        // Keep the current status and retry on the next poll.
+        // Keep the current status and retry after the normal interval.
+        scheduleNextPoll(5000);
       }
     };
 
-    poll();
-    const interval = window.setInterval(poll, 2000);
+    void poll();
+
     return () => {
       active = false;
-      window.clearInterval(interval);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
     };
   }, [seedrNotice?.taskId, seedrNotice?.status]);
 
