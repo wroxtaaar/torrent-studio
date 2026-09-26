@@ -1856,49 +1856,100 @@ async def seedr_task(task_id: str):
         raw_task = _seedr_data(await _seedr_task(task_id))
     except HTTPException as exc:
         if exc.status_code == 404:
-            return {"taskId": task_id, "name": "", "status": "waiting", "progress": 0, "task": None, "files": [], "downloadUrl": None}
+            return {
+                "taskId": task_id,
+                "name": "",
+                "status": "waiting",
+                "progress": 0,
+                "task": None,
+                "files": [],
+                "downloadUrl": None,
+            }
         raise
-    task = raw_task.get("task") if isinstance(raw_task, dict) and isinstance(raw_task.get("task"), dict) else (raw_task if isinstance(raw_task, dict) else {})
+
+    task = (
+        raw_task.get("task")
+        if isinstance(raw_task, dict) and isinstance(raw_task.get("task"), dict)
+        else (raw_task if isinstance(raw_task, dict) else {})
+    )
     progress, task = await _seedr_progress(task_id, task)
-    if not _seedr_task_complete(task) and progress < 100:
-        return {"taskId": task_id, "name": str(task.get("name") or task.get("title") or task.get("torrent_name") or ""), "status": "downloading", "progress": progress, "task": task, "files": [], "downloadUrl": None}
+    complete = _seedr_task_complete(task) or progress >= 100
+    name = str(
+        task.get("name")
+        or task.get("title")
+        or task.get("torrent_name")
+        or ""
+    )
+
+    # Seedr can expose filesystem entries before the overall torrent is done.
+    # Return those entries while the task is still downloading so the UI can
+    # show a file/folder immediately and reveal file actions as files become
+    # available.
     try:
         candidates = await _seedr_task_contents(task_id)
     except HTTPException as exc:
         if exc.status_code == 404:
-            return {"taskId": task_id, "name": str(task.get("name") or task.get("title") or ""), "status": "downloading", "progress": min(progress, 99.9), "task": task, "files": [], "downloadUrl": None}
-        raise
-    if not candidates:
-        return {"taskId": task_id, "name": str(task.get("name") or task.get("title") or ""), "status": "downloading", "progress": min(progress, 99.9), "task": task, "files": [], "downloadUrl": None}
-    files = []
+            candidates = []
+        else:
+            raise
+
+    files: list[dict[str, Any]] = []
     for file in candidates[:50]:
-        if not file["id"]:
+        file_id = str(file.get("id") or "").strip()
+        if not file_id:
             continue
+
+        download_url: str | None = None
         try:
-            details = await _seedr_file_details(file["id"])
-            download = await _seedr_download_url(file["id"])
-            files.append({
-                "id": file["id"],
-                "name": str(details.get("name") or details.get("filename") or file["name"]),
-                "size": int(details.get("size") or details.get("length") or file["size"]),
-                "url": download["url"],
-            })
+            download = await _seedr_download_url(file_id)
+            download_url = str(download.get("url") or "").strip() or None
         except Exception:
-            files.append({"id": file["id"], "name": file["name"], "size": file["size"], "url": None})
+            # A file can already exist in Seedr's folder while its final
+            # download URL is not available yet. Keep showing the file and
+            # expose its actions on a later poll when the URL becomes ready.
+            pass
+
+        files.append({
+            "id": file_id,
+            "name": str(file.get("name") or ""),
+            "size": int(file.get("size") or 0),
+            "folderId": str(file.get("folderId") or ""),
+            "folderPath": str(file.get("folderPath") or "/Torrent Studio"),
+            "url": download_url,
+            "available": download_url is not None,
+        })
+
+    if not complete:
+        return {
+            "taskId": task_id,
+            "name": name,
+            "status": "downloading",
+            "progress": min(progress, 99.9),
+            "task": task,
+            "files": files,
+            "downloadUrl": next((item["url"] for item in files if item.get("url")), None),
+        }
+
+    if not files:
+        return {
+            "taskId": task_id,
+            "name": name,
+            "status": "downloading",
+            "progress": min(progress, 99.9),
+            "task": task,
+            "files": [],
+            "downloadUrl": None,
+        }
+
     return {
         "taskId": task_id,
-        "name": str(task.get("name") or task.get("title") or task.get("torrent_name") or ""),
+        "name": name,
         "status": "completed",
         "progress": 100,
         "task": task,
         "files": files,
         "downloadUrl": next((item["url"] for item in files if item.get("url")), None),
     }
-
-
-@app.delete("/api/seedr/tasks/{task_id}")
-async def seedr_task_delete(task_id: str):
-    return await seedr_request(f"/tasks/{quote(str(task_id))}", "DELETE")
 
 
 @app.get("/api/seedr/files")
