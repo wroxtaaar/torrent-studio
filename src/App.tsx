@@ -1186,7 +1186,7 @@ export default function App() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <CloudDownload className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <Cloud className="w-4 h-4 text-emerald-400 shrink-0" />
                       <span className="text-xs font-bold text-emerald-300">Downloading with Seedr</span>
                       <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                         {seedrNotice.status === 'waiting' ? 'Waiting' : 'Downloading'}
