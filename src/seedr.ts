@@ -569,15 +569,46 @@ async function mapWithConcurrency<T, R>(
 }
 
 export async function listSeedrLibrary(): Promise<SeedrLibraryFile[]> {
-  // Torrent Studio must not expose unrelated files from the user's entire
-  // Seedr account. The free-tier /search/fs endpoint is a flat account-wide
-  // index, so use the configured Torrent Studio folder as the library root.
-  if (!SEEDR_LIBRARY_FOLDER_ID) {
+  // /search/fs is account-wide, so it must not be used as the library source.
+  // Seedr tasks tell us exactly which downloads belong to Torrent Studio:
+  // each task is stored under folder_id and may have a folder_created_id
+  // containing the completed files. Follow those task-created folders instead
+  // of exposing unrelated files from the rest of the Seedr account.
+  if (!SEEDR_LIBRARY_FOLDER_ID || !/^\\d+$/.test(SEEDR_LIBRARY_FOLDER_ID)) {
     console.warn('[SEEDR] SEEDR_LIBRARY_FOLDER_ID is not configured; library listing is disabled to avoid exposing unrelated account files.');
     return [];
   }
 
-  return collectSeedrFiles(SEEDR_LIBRARY_FOLDER_ID, '/Torrent Studio');
+  const tasks = await listSeedrTasks();
+  const torrentTasks = tasks
+    .map(normalizeTaskPayload)
+    .filter(task => String(task?.type ?? 'torrent').toLowerCase() === 'torrent')
+    .filter(task => String(task?.folder_id ?? '') === SEEDR_LIBRARY_FOLDER_ID)
+    .filter(task => taskIsComplete(task));
+
+  const folderIds = [...new Set(
+    torrentTasks
+      .map(task => numericId(task?.folder_created_id))
+      .filter(Boolean)
+  )];
+
+  if (!folderIds.length) {
+    return [];
+  }
+
+  const results = await mapWithConcurrency(
+    folderIds,
+    4,
+    folderId => collectSeedrFiles(folderId, '/Torrent Studio')
+  );
+
+  const seen = new Set<string>();
+  return results.flat().filter(file => {
+    const key = file.id || `${file.folderId}:${file.name}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export async function getSeedrFileDownload(fileId: string | number): Promise<{ url: string; name: string }> {
