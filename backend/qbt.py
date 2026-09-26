@@ -185,20 +185,63 @@ class QBitClient:
         return response.content
 
     async def inspect_magnet(self, magnet: str, category: str = "Downloads") -> dict[str, Any]:
-        info_hash = self.extract_info_hash(magnet)
-        existing = await self.json("GET", f"/api/v2/torrents/info?{urlencode({'hash': info_hash})}") or []
+        source = (magnet or "").strip()
+        info_hash = self.extract_info_hash(source)
+        existing_hashes: set[str] = set()
+
+        if info_hash:
+            existing = await self.json(
+                "GET",
+                f"/api/v2/torrents/info?{urlencode({'hash': info_hash})}"
+            ) or []
+        else:
+            # Search/indexer results can expose a .torrent/download URL instead
+            # of a magnet. Capture the existing hashes so we can identify the
+            # torrent qBittorrent creates when that URL is added.
+            existing = []
+            try:
+                all_torrents = await self.json("GET", "/api/v2/torrents/info") or []
+                existing_hashes = {
+                    str(item.get("hash") or "").strip().lower()
+                    for item in all_torrents
+                    if str(item.get("hash") or "").strip()
+                }
+            except Exception:
+                all_torrents = []
+
         if not existing:
             await self.add(
-                magnet,
+                source,
                 savepath="/downloads",
                 autoTMM="false",
                 stopCondition="MetadataReceived",
                 category=category,
             )
+
         for _ in range(60):
             await asyncio.sleep(1)
-            torrents = await self.json("GET", f"/api/v2/torrents/info?{urlencode({'hash': info_hash})}") or []
-            if torrents:
+
+            if info_hash:
+                torrents = await self.json(
+                    "GET",
+                    f"/api/v2/torrents/info?{urlencode({'hash': info_hash})}"
+                ) or []
+            else:
+                all_torrents = await self.json("GET", "/api/v2/torrents/info") or []
+                candidates = [
+                    item for item in all_torrents
+                    if str(item.get("hash") or "").strip().lower() not in existing_hashes
+                ]
+                candidates.sort(
+                    key=lambda item: int(item.get("added_on") or 0),
+                    reverse=True,
+                )
+                torrents = candidates[:1]
+
+                if torrents:
+                    info_hash = str(torrents[0].get("hash") or "").strip().lower()
+
+            if torrents and info_hash:
                 torrent = torrents[0]
                 # qBittorrent can expose the metadata torrent in /torrents/info
                 # a little before /torrents/files is ready. Treat a transient
@@ -212,12 +255,13 @@ class QBitClient:
                 if files:
                     return {
                         "name": torrent.get("name") or "Torrent",
-                        "hash": info_hash,
+                        "hash": str(torrent.get("hash") or info_hash).lower(),
                         "files": files,
                         "totalSize": sum(x["size"] for x in files),
                         "source": "qbt_metadata",
                         "createdPreview": True,
                     }
+
         return {
             "name": "Torrent",
             "hash": info_hash,
