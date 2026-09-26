@@ -1273,69 +1273,6 @@ export default function App() {
         {/* TAB 1: TRANSFERS & SEEDBOX */}
         {activeTab === 'transfers' && (
           <div className="space-y-4">
-            {seedrNotice?.status === 'completed' && (
-              <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 text-xs space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="font-bold">
-                      {seedrNotice.status === 'completed' ? 'Seedr download complete' : 'Seedr download accepted'}
-                    </div>
-                    <div className="text-emerald-400/80 mt-0.5 truncate">{seedrNotice.name}</div>
-                    {seedrNotice.status !== 'completed' && (
-                      <div className="mt-2">
-                        <div className="flex items-center justify-between text-[11px] text-emerald-400/80 mb-1">
-                          <span>Progress</span>
-                          <span>{Number(seedrNotice.progress).toFixed(2).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1')}%</span>
-                        </div>
-                        <div className="h-1.5 rounded-full bg-emerald-950 overflow-hidden">
-                          <div
-                            className="h-full rounded-full bg-emerald-400 transition-all duration-500"
-                            style={{ width: `${Math.max(0, Math.min(100, seedrNotice.progress))}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <span className="shrink-0 font-mono text-[11px]">Task {seedrNotice.taskId ?? 'created'}</span>
-                </div>
-                 {seedrNotice.selectionApplied === true && (
-                   <div className="mt-2 text-[11px] text-emerald-300">
-                     ✓ Seedr accepted your file selection.
-                   </div>
-                 )}
-                 {seedrNotice.selectionApplied === false && (
-                   <div className="mt-2 text-[11px] text-amber-300">
-                     ⚠ Seedr did not accept file selection — the full torrent will download.
-                     {seedrNotice.selectionError ? ` ${seedrNotice.selectionError}` : ''}
-                   </div>
-                 )}
-
-                {seedrNotice.status === 'completed' && seedrNotice.files.length > 0 && (
-                  <div className="space-y-1.5 pt-2 border-t border-emerald-500/15">
-                    <div className="font-semibold text-emerald-200">Downloaded files</div>
-                    {seedrNotice.files.map(file => (
-                      <div key={file.id} className="flex items-center justify-between gap-2 rounded-xl bg-slate-950/30 px-2.5 py-2">
-                        <div className="min-w-0">
-                          <div className="truncate text-emerald-100">{file.name}</div>
-                          <div className="text-[10px] text-emerald-400/60">{formatBytes(file.size)}</div>
-                        </div>
-                        {file.url && (
-                          <a
-                            href={file.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="shrink-0 px-2.5 py-1.5 rounded-lg bg-emerald-400 text-slate-950 font-bold hover:bg-emerald-300 transition"
-                          >
-                            Download
-                          </a>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-              </div>
-            )}
             {/* Action header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-slate-900 border border-slate-800">
               <div>
@@ -1418,6 +1355,43 @@ export default function App() {
                   <span>{seedrDeleteNotice}</span>
                 </div>
               )}
+              {seedrNotice?.taskId != null && seedrNotice.status !== 'completed' && (
+                <div className="mb-3 p-3.5 rounded-2xl bg-slate-900/80 border border-emerald-500/25 shadow-lg shadow-emerald-500/5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <Cloud className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span className="text-xs font-bold text-emerald-300">Downloading with Seedr</span>
+                        <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          {seedrNotice.status === 'waiting' ? 'Waiting' : 'Downloading'}
+                        </span>
+                      </div>
+                      <div className="text-sm font-semibold text-slate-200 mt-1 truncate">{seedrNotice.name}</div>
+                    </div>
+                    <div className="shrink-0 flex items-center gap-2">
+                      <span className="font-mono text-[11px] text-emerald-300">
+                        {Number(seedrNotice.progress).toFixed(2).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '')}%
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void handleCancelSeedrDownload()}
+                        disabled={isCancellingSeedr || seedrNotice.taskId == null}
+                        className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/25 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200 disabled:opacity-40 disabled:cursor-not-allowed text-[10px] font-bold transition"
+                        title="Cancel Seedr download"
+                      >
+                        {isCancellingSeedr ? 'Cancelling…' : 'Cancel'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-2 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-emerald-400 transition-all duration-500"
+                      style={{ width: Math.max(0, Math.min(100, Number(seedrNotice.progress) || 0)) + '%' }}
+                    />
+                  </div>
+                </div>
+              )}
+
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="min-w-0">
                   <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
@@ -1514,7 +1488,7 @@ export default function App() {
                               <div className="min-w-0 flex-1">
                                 <div className="truncate text-sm font-semibold text-slate-100">{folder.name}</div>
                                 <div className="text-[10px] text-slate-500 mt-0.5">
-                                  {folder.files.length} file{folder.files.length === 1 ? '' : 's'} • {formatBytes(folder.totalSize)} • 100% complete
+                                  {folder.files.length} file{folder.files.length === 1 ? '' : 's'} • {formatBytes(folder.totalSize)}
                                 </div>
                               </div>
                               {folder.folderId !== '__root__' && <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />}
@@ -1560,7 +1534,7 @@ export default function App() {
                             </button>
                             <div className="text-right min-w-0">
                               <div className="text-sm font-semibold text-slate-100 truncate">{folder.name}</div>
-                              <div className="text-[10px] text-slate-500">{folder.files.length} files • {formatBytes(folder.totalSize)} • 100% complete</div>
+                              <div className="text-[10px] text-slate-500">{folder.files.length} files • {formatBytes(folder.totalSize)}</div>
                             </div>
                             <button
                               type="button"
