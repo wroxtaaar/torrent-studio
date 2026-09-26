@@ -136,7 +136,14 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     try {
       setIsLoading(true);
       setError('');
-      await onAdd(source, category, [Number(file.index)], manifest, hash || undefined);
+      await onAdd(
+        source,
+        category,
+        [Number(file.index)],
+        manifest,
+        hash || undefined,
+        isDirectSeedrSource ? 'seedr' : undefined
+      );
       setBackgroundMode(false);
       onClose();
     } catch (err: any) {
