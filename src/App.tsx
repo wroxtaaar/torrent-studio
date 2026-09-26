@@ -1549,13 +1549,13 @@ export default function App() {
                 </div>
               )}
 
-              {!seedrLoading && !seedrError && seedrConfigured && seedrDisplayFiles.length === 0 && (
+              {!seedrLoading && !seedrError && seedrConfigured && seedrDisplayFiles.length === 0 && !(seedrNotice?.taskId != null && seedrNotice.status !== 'completed') && (
                 <div className="mt-3 rounded-xl bg-slate-900/70 border border-slate-800 px-3 py-3 text-xs text-slate-400">
                   No completed files are currently visible in your Seedr library.
                 </div>
               )}
 
-              {seedrConfigured && seedrDisplayFiles.length > 0 && (
+              {seedrConfigured && (
                 <div className="mt-3">
                   {selectedSeedrFolderId === null ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
