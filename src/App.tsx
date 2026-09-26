@@ -409,10 +409,23 @@ export default function App() {
       } else {
         setSeedrNotice(null);
       }
-      const updated = await api.getTorrents();
-      setTorrents(updated);
-      const stats = await api.getStorageStats();
-      setStorageStats(stats);
+      // Adding the torrent is the important operation. Refreshing the
+      // transfers/storage views is best-effort so a temporary qBittorrent
+      // polling error does not make a successful add look like a failure.
+      try {
+        const updated = await api.getTorrents();
+        setTorrents(updated);
+      } catch (refreshError) {
+        console.warn('Torrent added, but transfers could not be refreshed yet:', refreshError);
+      }
+
+      try {
+        const stats = await api.getStorageStats();
+        setStorageStats(stats);
+      } catch (refreshError) {
+        console.warn('Torrent added, but storage stats could not be refreshed yet:', refreshError);
+      }
+
       setActiveTab('transfers');
     } catch (error: any) {
       if (error?.code === 'SEEDR_INSUFFICIENT_SPACE') {
