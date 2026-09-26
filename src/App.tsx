@@ -662,6 +662,27 @@ export default function App() {
     };
   }, [seedrNotice?.taskId, seedrNotice?.status]);
 
+  const handleCancelSeedrDownload = async () => {
+    const taskId = seedrNotice?.taskId;
+    if (taskId == null) return;
+
+    const currentNotice = seedrNotice;
+    try {
+      setIsLoading(true);
+      await api.deleteSeedrTask(taskId);
+      setSeedrNotice(null);
+    } catch (error: any) {
+      console.error('Failed to cancel Seedr download:', error);
+      setSeedrNotice(currentNotice);
+      setSeedrAddBlockedNotice(
+        error?.message || 'Failed to cancel the Seedr download. Please try again.'
+      );
+      window.setTimeout(() => setSeedrAddBlockedNotice(null), 5000);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleStreamTorrent = (torrent: TorrentItem) => {
     const streamableFile = torrent.files?.find(file => {
       if (file.priority <= 0 || file.progress < 0.999) return false;
@@ -1365,9 +1386,20 @@ export default function App() {
                       </div>
                     </div>
                   </div>
-                  <span className="shrink-0 font-mono text-[10px] text-slate-500">
-                    Task {seedrNotice.taskId ?? 'created'}
-                  </span>
+                  <div className="shrink-0 flex items-center gap-2">
+                    <span className="font-mono text-[10px] text-slate-500">
+                      Task {seedrNotice.taskId ?? 'created'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void handleCancelSeedrDownload()}
+                      disabled={isLoading || seedrNotice.taskId == null}
+                      className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/25 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200 disabled:opacity-40 disabled:cursor-not-allowed text-[10px] font-bold transition"
+                      title="Cancel Seedr download"
+                    >
+                      {isLoading ? 'Cancelling…' : 'Cancel'}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
