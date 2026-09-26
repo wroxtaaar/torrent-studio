@@ -510,41 +510,36 @@ async def recent_clear():
     return {"success": True}
 
 
-async def prowlarr_search(query: str, limit: int) -> list[dict[str, Any]]:
-    base = (os.getenv("PROWLARR_URL") or "http://prowlarr:9696").rstrip("/")
-    key = os.getenv("PROWLARR_API_KEY", "")
-    if not key:
-        raise HTTPException(503, "Torrent search is not configured. Set PROWLARR_API_KEY.")
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.get(
-            f"{base}/api/v1/search",
-            params={"query": query, "type": "search", "limit": min(max(limit, 1), 10), "offset": 0},
-            headers={"Accept": "application/json", "X-Api-Key": key},
-        )
+async def search_provider(query: str, limit: int) -> list[dict[str, Any]]:
+    base = (os.getenv("TORRENT_SEARCH_URL") or "").strip().rstrip("/")
+    if not base:
+        raise HTTPException(503, "Torrent search is not configured. Set TORRENT_SEARCH_URL.")
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        response = await client.get(base, params={"query": query, "q": query, "page": 1, "limit": min(max(limit, 1), 10)}, headers={"Accept": "application/json"})
     if response.status_code >= 400:
-        raise HTTPException(response.status_code, response.text or "Prowlarr search failed")
-    releases = response.json()
-    if not isinstance(releases, list):
-        releases = releases.get("results", []) if isinstance(releases, dict) else []
+        raise HTTPException(response.status_code, response.text or "Torrent search provider failed")
+    payload = response.json()
+    releases = payload if isinstance(payload, list) else (payload.get("results") or payload.get("data") or []) if isinstance(payload, dict) else []
     result = []
     for release in releases:
-        if str(release.get("protocol", "")).lower() == "usenet":
+        if not isinstance(release, dict):
             continue
+        magnet = str(release.get("magnetUrl") or release.get("magnet_url") or release.get("magnet_link") or release.get("magnet") or "").strip() or None
         result.append({
-            "guid": release.get("guid"),
-            "title": str(release.get("title") or release.get("sortTitle") or "Untitled"),
+            "guid": release.get("guid") or release.get("id"),
+            "title": str(release.get("title") or release.get("name") or "Untitled"),
             "size": int(release.get("size") or 0),
-            "seeders": int(release.get("seeders") or 0),
-            "leechers": int(release.get("leechers") or release.get("leecherCount") or 0),
-            "indexer": str(release.get("indexer") or ""),
-            "protocol": str(release.get("protocol") or ""),
-            "publishDate": release.get("publishDate"),
-            "infoHash": str(release.get("infoHash") or ""),
-            "magnetUrl": str(release.get("magnetUrl") or release.get("magneturl") or "") or None,
-            "infoUrl": str(release.get("infoUrl") or "").strip() or None,
-            "sourceUrl": str(release.get("magnetUrl") or release.get("downloadUrl") or "").strip() or None,
+            "seeders": int(release.get("seeders") or release.get("seeds") or 0),
+            "leechers": int(release.get("leechers") or release.get("leeches") or 0),
+            "indexer": str(release.get("indexer") or release.get("provider") or ""),
+            "protocol": "torrent",
+            "publishDate": release.get("publishDate") or release.get("date") or release.get("created_at"),
+            "infoHash": str(release.get("infoHash") or release.get("info_hash") or release.get("hash") or ""),
+            "magnetUrl": magnet,
+            "infoUrl": str(release.get("infoUrl") or release.get("web_url") or release.get("url") or "").strip() or None,
+            "sourceUrl": str(release.get("sourceUrl") or release.get("url") or magnet or "").strip() or None,
         })
-    return result
+    return result[:10]
 
 
 @app.get("/api/search/torrents")
@@ -552,7 +547,7 @@ async def search_torrents(q: str = "", limit: int = 10):
     query = q.strip()
     if not query:
         return {"results": []}
-    result = await prowlarr_search(query, limit)
+    result = await search_provider(query, limit)
     searches = read_json(RECENT_SEARCHES_FILE, [])
     write_json(RECENT_SEARCHES_FILE, [query] + [x for x in searches if x != query][:9])
     return {"results": result}
