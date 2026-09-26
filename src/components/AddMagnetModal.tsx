@@ -76,18 +76,23 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
 
   // Reset or initialize modal state
   useEffect(() => {
+    if (isOpen && !initialMagnet.trim()) {
+      // A normal Add Magnet open must always start clean. Otherwise a
+      // previously opened search result can leak into the next session.
+      setMagnetInput('');
+      setInspectedFiles([]);
+      setInspectedHash('');
+      setInspectionSource('');
+      setCopiedMagnet(false);
+    }
+
     if (isOpen) {
       setBackgroundMode(false);
       setError('');
       setShowManifestEditor(false);
       setPasteManifestText('');
-      // If modal opens empty, start clean so user pastes their real link
-      if (!magnetInput) {
-        setInspectedFiles([]);
-        setInspectedHash('');
-      }
     }
-  }, [isOpen]);
+  }, [isOpen, initialMagnet]);
 
   const classifyFileType = (name: string): InspectFileItem['type'] => {
     const lower = String(name || '').toLowerCase();
