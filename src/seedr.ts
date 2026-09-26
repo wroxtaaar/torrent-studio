@@ -615,10 +615,12 @@ export async function getSeedrTaskStatus(
     const status = getStatus(error);
 
     if (status === 404) {
+      // The task no longer exists in Seedr. Do NOT report it as "waiting":
+      // the frontend would keep polling forever and resurrect stale state.
       return {
         taskId,
         name: '',
-        status: 'waiting',
+        status: 'not_found',
         progress: 0,
         task: null,
         files: [],
