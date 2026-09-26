@@ -466,7 +466,7 @@ export default function App() {
       if (result.backend === 'seedr') {
         setSeedrNotice({
           taskId: result.seedrTaskId ?? null,
-          name: manifest?.[0]?.name || magnet,
+           name: 'Waiting for torrent metadata…',
           status: 'waiting',
           progress: 0,
           downloadUrl: null,
