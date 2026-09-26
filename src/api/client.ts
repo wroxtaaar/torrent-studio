@@ -52,6 +52,19 @@ export const api = {
     return Array.isArray(data?.results) ? data.results : [];
   },
 
+  async addSearchTorrent(source: string, size: number, infoHash?: string): Promise<any> {
+    const res = await fetch('/api/search/torrents/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source, size, infoHash })
+    });
+    const body = await res.text();
+    let data: any = null;
+    try { data = body ? JSON.parse(body) : null; } catch {}
+    if (!res.ok) throw new Error(data?.error || body || 'Failed to add search result');
+    return data;
+  },
+
   async getTorrents(filter?: string): Promise<TorrentItem[]> {
     const url = filter ? `/api/v2/torrents/info?filter=${filter}` : '/api/v2/torrents/info';
     const res = await fetch(url);
