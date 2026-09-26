@@ -523,15 +523,57 @@ export default function App() {
       return;
     }
 
-    // Do not send search results directly to Seedr. A search result only
-    // gives us the aggregate torrent size; it does not tell us which files the
-    // user wants. Sending the whole magnet to Seedr first would make a
-    // multi-file torrent start immediately and can consume the entire free
-    // quota before the user gets a chance to select files.
-    //
-    // Open the normal selector instead. AddMagnetModal resolves the torrent
-    // through qBittorrent while paused, lets the user choose files, and only
-    // then sends the selected files to Seedr when they fit the remaining quota.
+    // Search results already provide the complete torrent size. There is no
+    // need to resolve qBittorrent metadata again just to decide whether the
+    // whole search result fits in the remaining Seedr quota.
+    if (seedrSource && Number(size) > 0) {
+      try {
+        const quota = await api.getSeedrQuota();
+        if (
+          quota.configured &&
+          Number(size) < quota.remainingSpace
+        ) {
+          await handleAddMagnet(
+            seedrSource,
+            'Downloads',
+            undefined,
+            undefined,
+            undefined,
+            'seedr',
+            undefined,
+            undefined,
+            title
+          );
+          return;
+        }
+
+        // The complete torrent does not fit in Seedr. Fall back to the
+        // normal qBittorrent download rather than opening the file-selector
+        // again for a search result.
+        await handleAddMagnet(
+          trimmedSource || seedrSource,
+          'Downloads',
+          undefined,
+          undefined,
+          undefined,
+          'qbittorrent',
+          undefined,
+          undefined,
+          title
+        );
+        return;
+      } catch (error: any) {
+        setSeedrAddBlockedNotice(
+          error?.message || 'Could not start the search result download.'
+        );
+        setActiveTab('transfers');
+        window.setTimeout(() => setSeedrAddBlockedNotice(null), 5000);
+        return;
+      }
+    }
+
+    // If the search result has no usable magnet/hash, keep the existing
+    // selector flow as the safe fallback.
     openAddMagnet(source);
   };
 
