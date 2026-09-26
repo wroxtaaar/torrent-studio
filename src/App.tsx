@@ -97,7 +97,7 @@ export default function App() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [qbtSettings, setQbtSettings] = useState<QbtSettings | null>(null);
   const [cleanupSettings, setCleanupSettings] = useState<CleanupSettings | null>(null);
-  const [seedrNotice, setSeedrNotice] = useState<{ taskId: number | null; name: string } | null>(null);
+  const [seedrNotice, setSeedrNotice] = useState<{ taskId: number | null; name: string; status: 'waiting' | 'downloading' | 'completed'; progress: number; downloadUrl: string | null } | null>(null);
 
   // File Explorer State
   const [currentFolder, setCurrentFolder] = useState<string>('/');
@@ -270,7 +270,10 @@ export default function App() {
     if (result.backend === 'seedr') {
       setSeedrNotice({
         taskId: result.seedrTaskId ?? null,
-        name: manifest?.[0]?.name || magnet
+        name: manifest?.[0]?.name || magnet,
+        status: 'waiting',
+        progress: 0,
+        downloadUrl: null,
       });
     } else {
       setSeedrNotice(null);
@@ -281,6 +284,34 @@ export default function App() {
     setStorageStats(stats);
     setActiveTab('transfers');
   };
+
+
+  useEffect(() => {
+    if (!seedrNotice?.taskId || seedrNotice.status === 'completed') return;
+
+    let active = true;
+    const poll = async () => {
+      try {
+        const result = await api.getSeedrTask(seedrNotice.taskId!);
+        if (!active) return;
+        setSeedrNotice(prev => prev ? {
+          ...prev,
+          status: result.status,
+          progress: result.progress,
+          downloadUrl: result.downloadUrl,
+        } : null);
+      } catch {
+        // Keep the current status and retry on the next poll.
+      }
+    };
+
+    poll();
+    const interval = window.setInterval(poll, 5000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [seedrNotice?.taskId, seedrNotice?.status]);
 
   const handleStreamTorrent = (torrent: TorrentItem) => {
     const streamableFile = torrent.files?.find(file => {
@@ -744,11 +775,28 @@ export default function App() {
           <div className="space-y-4">
             {seedrNotice && (
               <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 text-xs flex items-center justify-between gap-3">
-                <div>
-                  <div className="font-bold">Sent to Seedr</div>
+                <div className="min-w-0">
+                  <div className="font-bold">
+                    {seedrNotice.status === 'completed' ? 'Seedr download ready' : 'Sent to Seedr'}
+                  </div>
                   <div className="text-emerald-400/80 mt-0.5 truncate">{seedrNotice.name}</div>
+                  {seedrNotice.status !== 'completed' && (
+                    <div className="text-emerald-400/70 mt-1">Progress: {Math.round(seedrNotice.progress)}%</div>
+                  )}
                 </div>
-                <span className="shrink-0 font-mono text-[11px]">Task {seedrNotice.taskId ?? 'created'}</span>
+                <div className="shrink-0 flex items-center gap-2">
+                  <span className="font-mono text-[11px]">Task {seedrNotice.taskId ?? 'created'}</span>
+                  {seedrNotice.downloadUrl && (
+                    <a
+                      href={seedrNotice.downloadUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-2.5 py-1.5 rounded-lg bg-emerald-400 text-slate-950 font-bold hover:bg-emerald-300 transition"
+                    >
+                      Download
+                    </a>
+                  )}
+                </div>
               </div>
             )}
             {/* Action header */}
