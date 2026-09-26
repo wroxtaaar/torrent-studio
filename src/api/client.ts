@@ -177,6 +177,21 @@ export const api = {
     return await res.json().catch(() => ({ backend: 'qbittorrent' }));
   },
 
+
+  async getSeedrTask(taskId: number | string): Promise<{
+    taskId: number | string;
+    status: 'waiting' | 'downloading' | 'completed';
+    progress: number;
+    downloadUrl: string | null;
+    files: Array<{ id: string; name: string; size: number; url: string | null }>;
+  }> {
+    const res = await fetch('/api/seedr/tasks/' + encodeURIComponent(String(taskId)));
+    const body = await res.text();
+    let data: any = null;
+    try { data = body ? JSON.parse(body) : null; } catch { data = null; }
+    if (!res.ok) throw new Error(data?.error || body || 'Failed to check Seedr task');
+    return data;
+  },
   async pauseTorrent(hash: string): Promise<void> {
     const res = await fetch('/api/v2/torrents/pause', {
       method: 'POST',
