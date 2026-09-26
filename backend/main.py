@@ -482,6 +482,31 @@ async def torrents_add(body: dict[str, Any]):
         if not SEEDR_LIBRARY_FOLDER_ID.isdigit():
             raise HTTPException(503, "SEEDR_LIBRARY_FOLDER_ID must be configured for Seedr downloads")
 
+        # Seedr checks the full torrent size when a magnet is added.
+        # If the user selected only part of a multi-file torrent, keep the
+        # inspected qBittorrent torrent and download only those selected files.
+        selected_size = sum(
+            max(0, int(item.get("size") or 0))
+            for item in manifest
+            if isinstance(item, dict) and int(item.get("priority") or 0) > 0
+        )
+        total_manifest_size = sum(
+            max(0, int(item.get("size") or 0))
+            for item in manifest
+            if isinstance(item, dict)
+        )
+        if existing_hash and selected_size > 0 and total_manifest_size > selected_size:
+            await qbt.set_file_priorities(existing_hash, manifest, selected_ids)
+            await qbt.resume(existing_hash)
+            return {
+                "backend": "qbittorrent",
+                "seedrTaskId": None,
+                "existingHash": existing_hash,
+                "selectedNames": body.get("selectedNames") or [],
+                "seedrFallback": True,
+                "seedrFallbackReason": "Seedr cannot accept a partial torrent selection when the full torrent is larger than available storage.",
+            }
+
         # The frontend decides the backend from the user's selected files.
         # Re-check the same selected-size rule server-side so a stale quota
         # value cannot cause Seedr to receive a selection that no longer fits.
