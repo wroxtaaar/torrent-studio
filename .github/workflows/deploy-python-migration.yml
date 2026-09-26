@@ -1,0 +1,55 @@
+name: Deploy Python Migration
+
+on:
+  push:
+    branches:
+      - python-migration
+  workflow_dispatch:
+
+concurrency:
+  group: python-migration-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to Oracle VPS
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script_stop: true
+          script: |
+            set -e
+
+            cd ~/torrent-studio-python
+
+            echo "==> Syncing python-migration"
+            git fetch origin python-migration
+            git checkout python-migration
+            git reset --hard origin/python-migration
+
+            echo "==> Building app"
+            docker compose build app
+
+            echo "==> Restarting app"
+            docker compose up -d --no-deps app
+
+            echo "==> Waiting for health"
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:3000/health >/tmp/torrent-studio-health.json 2>/dev/null; then
+                cat /tmp/torrent-studio-health.json
+                echo
+                echo "Deployment successful."
+                exit 0
+              fi
+              sleep 2
+            done
+
+            echo "Deployment failed: health check did not become ready."
+            docker compose logs --tail=100 app
+            exit 1
