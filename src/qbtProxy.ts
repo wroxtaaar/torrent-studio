@@ -1108,9 +1108,11 @@ export function installQbtProxy(app: Express) {
                 id: requestedSeedrTaskId,
               })).catch(() => null)
             : (infoHash ? await findSeedrTaskByHash(infoHash) : null);
-          const selectedNames = Array.isArray(body.selectedNames)
-            ? body.selectedNames.map((name: any) => String(name || '').split('/').pop()).filter(Boolean)
-            : [];
+
+          if (requestedSeedrTaskId && !seedrTask) {
+            throw new Error('The prepared Seedr task is no longer available. Please paste the magnet again.');
+          }
+
           const selectedFileIndexes = Array.isArray(body.selectedFiles)
             ? body.selectedFiles.map(Number).filter((index: number) => Number.isInteger(index) && index >= 0)
             : [];
