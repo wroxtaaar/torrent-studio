@@ -215,6 +215,15 @@ export const api = {
     return data;
   },
 
+  async getSeedrFolderDownload(folderId: string): Promise<{ url: string }> {
+    const res = await fetch('/api/seedr/folders/' + encodeURIComponent(folderId) + '/download');
+    const body = await res.text();
+    let data: any = null;
+    try { data = body ? JSON.parse(body) : null; } catch { data = null; }
+    if (!res.ok) throw new Error(data?.error || body || 'Failed to create Seedr folder download');
+    return data;
+  },
+
   async deleteSeedrFolder(folderId: string): Promise<void> {
     const res = await fetch('/api/seedr/folders/' + encodeURIComponent(folderId), { method: 'DELETE' });
     const body = await res.text();
