@@ -886,38 +886,50 @@ export function installQbtProxy(app: Express) {
         // That lets qBittorrent resolve metadata through its normal torrent
         // engine, while guaranteeing nothing starts before the user selects files.
         let hash = sourceHash;
+        let createdPreview = false;
         if (hash && await torrentExists(hash)) {
           // This torrent already exists. Do not stop or reset an active
-          // download just because the user opened it from Search again.
-          // Newly-added torrents are handled by addTorrentForMetadata and
-          // remain paused until the user confirms file selection.
+          // download just because background metadata is being refreshed.
         } else {
           const hashes = await addTorrentForMetadata(source, category);
           hash = hashes[0];
+          createdPreview = true;
         }
 
         if (hash) rememberPreviewTorrent(source, hash);
 
         const files = await waitForTorrentFiles(hash, 10, 1000);
+        let torrentName = 'Torrent';
+        if (hash) {
+          try {
+            const info = await qbtJson('/api/v2/torrents/info?hash=' + encodeURIComponent(hash));
+            torrentName = String(Array.isArray(info) ? info[0]?.name || 'Torrent' : 'Torrent');
+          } catch {
+            // File metadata is still useful even if the name lookup is unavailable.
+          }
+        }
+
         if (!files.length) {
           return res.status(202).json({
-            name: 'Torrent',
+            name: torrentName,
             hash,
             files: [],
             totalSize: 0,
             source: 'qbt_torrent_pending',
             pending: true,
-            message: 'Torrent has been added paused. qBittorrent is still obtaining its file metadata.'
+            createdPreview,
+            message: 'qBittorrent is still obtaining torrent metadata in the background.'
           });
         }
 
         const mappedFiles = mapInspectFiles(files);
         return res.json({
-          name: 'Torrent',
+          name: torrentName,
           hash,
           files: mappedFiles,
           totalSize: mappedFiles.reduce((sum: number, f: any) => sum + f.size, 0),
-          source: 'qbt_torrent_files'
+          source: 'qbt_torrent_files',
+          createdPreview
         });
       }
 
