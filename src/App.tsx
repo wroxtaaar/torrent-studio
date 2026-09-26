@@ -665,8 +665,22 @@ export default function App() {
 
   const handleDeleteSeedrFile = async (file: { id: string; name: string; size: number; folderId: string; folderPath: string }) => {
     try {
-      await api.deleteSeedrFile(file.id);
-      setSeedrFiles(prev => prev.filter(item => item.id !== file.id));
+      // A single-file Seedr folder is represented directly in My Cloud Files.
+      // In that special case, delete the whole Seedr folder rather than only
+      // the file. Files inside multi-file folders still use file deletion.
+      const group = seedrFolderGroups.find(item => item.folderId === file.folderId);
+      const isSingleFileFolder =
+        file.folderId !== '__root__' &&
+        group?.files.length === 1;
+
+      if (isSingleFileFolder) {
+        await api.deleteSeedrFolder(file.folderId);
+        setSeedrFiles(prev => prev.filter(item => item.folderId !== file.folderId));
+      } else {
+        await api.deleteSeedrFile(file.id);
+        setSeedrFiles(prev => prev.filter(item => item.id !== file.id));
+      }
+
       setSeedrError(null);
       const quota = await api.getSeedrQuota().catch(() => null);
       if (quota?.configured) {
@@ -677,8 +691,8 @@ export default function App() {
         });
       }
     } catch (error) {
-      console.error('Failed to delete Seedr file:', error);
-      setSeedrError(error instanceof Error ? error.message : 'Failed to delete Seedr file');
+      console.error('Failed to delete Seedr item:', error);
+      setSeedrError(error instanceof Error ? error.message : 'Failed to delete Seedr item');
     }
   };
 
