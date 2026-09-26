@@ -96,114 +96,102 @@ export const FilePrioModal: React.FC<FilePrioModalProps> = ({
               <FileCheck className="w-5 h-5" />
             </div>
             <div className="truncate">
-              <h3 className="text-base font-bold text-slate-100 truncate">{torrent.name}</h3>
-              <p className="text-xs text-slate-400">
-                {activeFiles.length} of {localFiles.length} files downloading ({formatBytes(activeSize)}) • {localFiles.length - activeFiles.length} skipped
+              <h3 className="text-base font-bold text-slate-100 truncate">Choose files to download</h3>
+              <p className="text-xs text-slate-400 truncate">
+                {activeFiles.length} of {localFiles.length} selected • {formatBytes(activeSize)} selected
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition"
+            aria-label="Close file selection"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="px-5 py-3 bg-slate-950/60 border-b border-slate-800 flex items-center gap-2 text-xs">
-          <button
-            onClick={() => void selectAll(true)}
-            disabled={isUpdating}
-            className="text-slate-400 hover:text-slate-200 disabled:opacity-40 text-xs font-medium"
-          >
-            Select All
-          </button>
-          <span className="text-slate-600">•</span>
-          <button
-            onClick={() => void selectAll(false)}
-            disabled={isUpdating}
-            className="text-slate-400 hover:text-slate-200 disabled:opacity-40 text-xs font-medium"
-          >
-            Clear
-          </button>
+        <div className="px-5 py-2.5 bg-slate-950/60 border-b border-slate-800 flex items-center justify-between gap-3">
+          <span className="text-[11px] text-slate-500">Checked = download • Unchecked = skip</span>
+          <div className="flex items-center gap-2 text-xs">
+            <button
+              onClick={() => void selectAll(true)}
+              disabled={isUpdating}
+              className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 font-semibold"
+            >
+              Select all
+            </button>
+            <button
+              onClick={() => void selectAll(false)}
+              disabled={isUpdating}
+              className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 font-semibold"
+            >
+              Select none
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
           {[...localFiles]
             .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
-            .map((file) => {
-            const isChecked = file.priority > 0;
-            return (
-              <div
-                key={file.index}
-                className="p-3 rounded-xl border text-xs transition flex items-center justify-between gap-3 bg-slate-850 border-slate-800 hover:border-slate-700"
-              >
-                <div
-                  onClick={() => void toggleDownload(file.index)}
-                  className="flex items-center gap-3 overflow-hidden cursor-pointer flex-1"
-                  title={isChecked ? 'Click to skip this file' : 'Click to download this file'}
-                >
-                  <div className="shrink-0">
-                    {isChecked ? (
-                      <CheckSquare className="w-4 h-4 text-cyan-400" />
-                    ) : (
-                      <Square className="w-4 h-4 text-slate-500" />
-                    )}
-                  </div>
+               <div
+                 key={file.index}
+                 className="p-3 rounded-xl border text-xs transition flex items-center gap-3 bg-slate-850 border-slate-800 hover:border-slate-700"
+               >
+                 <button
+                   type="button"
+                   disabled={isUpdating}
+                   onClick={() => void toggleDownload(file.index)}
+                   className="shrink-0 p-0.5 rounded focus:outline-none focus:ring-2 focus:ring-cyan-500/40 disabled:opacity-40"
+                   aria-label={isChecked ? `Skip ${file.name}` : `Include ${file.name}`}
+                 >
+                   {isChecked ? (
+                     <CheckSquare className="w-5 h-5 text-cyan-400" />
+                   ) : (
+                     <Square className="w-5 h-5 text-slate-500" />
+                   )}
+                 </button>
 
-                  <div className="truncate">
-                    <p className="font-medium font-mono truncate text-slate-200">
-                      {file.name}
-                    </p>
-                    <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400">
-                      <span>{formatBytes(file.size)}</span>
-                      <span>•</span>
-                      <span className={file.progress >= 1 ? 'text-emerald-400 font-semibold' : isChecked ? 'text-cyan-400 font-medium' : 'text-slate-500'}>
-                        {file.progress >= 1
-                          ? `${(file.progress * 100).toFixed(1)}% downloaded`
-                          : isChecked
-                          ? `${(file.progress * 100).toFixed(1)}% downloaded`
-                          : 'Skipped'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
+                 <button
+                   type="button"
+                   disabled={isUpdating}
+                   onClick={() => void toggleDownload(file.index)}
+                   className="min-w-0 flex-1 text-left disabled:opacity-60"
+                 >
+                   <p className="font-medium font-mono truncate text-slate-200">
+                     {file.name}
+                   </p>
+                   <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400">
+                     <span>{formatBytes(file.size)}</span>
+                     <span>•</span>
+                     <span className={file.progress >= 1 ? 'text-emerald-400 font-semibold' : isChecked ? 'text-cyan-400 font-medium' : 'text-slate-500'}>
+                       {file.progress >= 1
+                         ? `${(file.progress * 100).toFixed(1)}% downloaded`
+                         : isChecked
+                         ? 'Ready to download'
+                         : 'Will be skipped'}
+                     </span>
+                   </div>
+                 </button>
 
-                <div className="flex items-center gap-2 shrink-0">
-                  {file.progress >= 1 && isChecked && (
-                    <a
-                      href={`/api/torrents/download/${torrent.hash}/${file.index}`}
-                      download={file.name}
-                      className="px-2 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold flex items-center gap-1 transition"
-                      title="Download file to device"
-                    >
-                      <Download className="w-3 h-3" />
-                      <span>Download</span>
-                    </a>
-                  )}
-
-                  <button
-                    type="button"
-                    disabled={isUpdating}
-                    onClick={() => void toggleDownload(file.index)}
-                    className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 transition text-[11px] ${
-                      isChecked
-                        ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                        : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                    }`}
-                  >
-                    {isChecked ? (
-                      <>
-                        <Ban className="w-3 h-3" />
-                        <span>Skip File</span>
-                      </>
-                    ) : (
-                      <>
-                        <Check className="w-3 h-3" />
-                        <span>Start Download</span>
-                      </>
-                    )}
-                  </button>
+                 <div className="flex items-center gap-2 shrink-0">
+                   {file.progress >= 1 && isChecked ? (
+                     <a
+                       href={`/api/torrents/download/${torrent.hash}/${file.index}`}
+                       download={file.name}
+                       className="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold flex items-center gap-1 transition"
+                       title="Download file to device"
+                     >
+                       <Download className="w-3 h-3" />
+                       <span>Save</span>
+                     </a>
+                   ) : (
+                     <span className={`px-2 py-1 rounded-lg text-[10px] font-bold border ${isChecked ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20' : 'bg-slate-800 text-slate-500 border-slate-700'}`}>
+                       {isChecked ? 'Selected' : 'Skipped'}
+                     </span>
+                   )}
+                 </div>
+               </div>
 
                 </div>
               </div>
@@ -213,7 +201,11 @@ export const FilePrioModal: React.FC<FilePrioModalProps> = ({
 
         <div className="px-5 py-3 border-t border-slate-800 bg-slate-900 flex justify-between items-center">
           <div className="text-xs text-slate-400">
-            Checked files are downloaded. Unchecked files are skipped.
+            {activeFiles.length === localFiles.length
+              ? 'All files are selected for download.'
+              : activeFiles.length === 0
+              ? 'No files are selected.'
+              : `${activeFiles.length} file${activeFiles.length === 1 ? '' : 's'} selected for download.`}
           </div>
           <button
             onClick={onClose}
