@@ -1,0 +1,33 @@
+name: Python migration CI
+
+on:
+  push:
+    branches:
+      - python-migration
+  pull_request:
+    branches:
+      - python-migration
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+      - name: Compile Python backend
+        run: python -m compileall -q backend
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
