@@ -1071,11 +1071,39 @@ async def seedr_request(path: str, method: str = "GET", body: Any = None, form: 
                 )
         else:
             message = text
+
+        if response.status_code == 401:
+            message = str(message or "Seedr token is expired or invalid")
+        elif response.status_code in (402, 403):
+            message = str(message or "Seedr requires a premium plan for this operation")
+        elif response.status_code == 429:
+            retry_after = response.headers.get("Retry-After")
+            if retry_after:
+                message = f"{message or 'Seedr rate limit exceeded'} (retry after {retry_after}s)"
+
         print(
             f"[SEEDR] {method} {path} -> HTTP {response.status_code}: "
             f"{str(message or 'Seedr API request failed')}"
         )
         raise HTTPException(response.status_code, str(message or "Seedr API request failed"))
+
+    # Some V2 endpoints return HTTP 200 with a soft failure encoded in the
+    # reason_phrase/error fields instead of using a 4xx status.
+    if isinstance(data, dict):
+        soft_error = str(data.get("reason_phrase") or data.get("error") or "").strip()
+        if soft_error and not (
+            data.get("success") is True
+            or data.get("result") is True
+            or data.get("user_torrent_id") is not None
+            or data.get("id") is not None
+            or data.get("task_id") is not None
+        ):
+            if soft_error in {"not_enough_space", "not_enough_space_added_to_wishlist"}:
+                raise HTTPException(413, "Not enough storage space in your Seedr account.")
+            if soft_error in {"queue_full", "queue_full_added_to_wishlist"}:
+                raise HTTPException(409, "Seedr download queue is full. Please wait for the current download to finish.")
+            raise HTTPException(502, f"Seedr rejected the request: {soft_error}")
+
     return data
 
 
@@ -1155,40 +1183,61 @@ def _seedr_progress_value(value: Any, depth: int = 0) -> float | None:
 
 
 def _seedr_info_hash(magnet: str) -> str:
-    match = re.search(r"urn:btih:([a-fA-F0-9]{40})", str(magnet or ""))
+    value = str(magnet or "")
+    match = re.search(r"urn:btih:([a-zA-Z0-9]{32,40})", value, re.IGNORECASE)
     return match.group(1).lower() if match else ""
+
+
+def _seedr_task_info_hash(task: dict[str, Any]) -> str:
+    if not isinstance(task, dict):
+        return ""
+
+    nested = task.get("task") if isinstance(task.get("task"), dict) else {}
+    torrent_payload = task.get("torrent_payload") if isinstance(task.get("torrent_payload"), dict) else {}
+    nested_payload = nested.get("torrent_payload") if isinstance(nested.get("torrent_payload"), dict) else {}
+
+    for value in (
+        torrent_payload.get("hash"),
+        task.get("torrent_hash"),
+        task.get("hash"),
+        task.get("info_hash"),
+        nested_payload.get("hash"),
+        nested.get("torrent_hash"),
+        nested.get("hash"),
+        nested.get("info_hash"),
+        task.get("url"),
+        task.get("torrent_url"),
+        nested.get("url"),
+        nested.get("torrent_url"),
+    ):
+        candidate = str(value or "").strip()
+        if not candidate:
+            continue
+        extracted = _seedr_info_hash(candidate)
+        if extracted:
+            return extracted
+        if re.fullmatch(r"[a-fA-F0-9]{32,40}", candidate):
+            return candidate.lower()
+
+    return ""
 
 
 async def _seedr_find_task_by_hash(info_hash: str) -> dict[str, Any] | None:
     target = str(info_hash or "").strip().lower()
     if not target:
         return None
-    try:
-        payload = await seedr_request("/tasks")
-        for raw in _seedr_array(payload, ("tasks", "torrents")):
-            task = _seedr_data(raw)
-            if not isinstance(task, dict):
-                continue
-            nested = task.get("task") if isinstance(task.get("task"), dict) else {}
-            torrent_payload = task.get("torrent_payload") if isinstance(task.get("torrent_payload"), dict) else {}
-            nested_payload = nested.get("torrent_payload") if isinstance(nested.get("torrent_payload"), dict) else {}
-            candidate = str(
-                torrent_payload.get("hash")
-                or task.get("torrent_hash")
-                or task.get("hash")
-                or task.get("info_hash")
-                or nested_payload.get("hash")
-                or nested.get("torrent_hash")
-                or nested.get("hash")
-                or nested.get("info_hash")
-                or ""
-            ).lower()
-            if candidate == target:
-                return task
-    except Exception:
-        pass
-    return None
 
+    payload = await seedr_request("/tasks")
+    tasks = _seedr_array(payload, ("tasks", "torrents"))
+
+    for raw in tasks:
+        task = _seedr_data(raw)
+        if not isinstance(task, dict):
+            continue
+        if _seedr_task_info_hash(task) == target:
+            return task
+
+    return None
 
 def _seedr_task_complete(task: dict[str, Any]) -> bool:
     if not isinstance(task, dict):
@@ -1244,9 +1293,38 @@ async def _seedr_task_contents(task_id: str) -> list[dict[str, Any]]:
 
 
 async def _seedr_download_url(file_id: str) -> dict[str, str]:
-    payload = _seedr_data(await seedr_request(f"/download/file/{quote(str(file_id))}/url"))
+    file_id = str(file_id)
+
+    # Prefer the V2 presentation endpoint for playable media, then fall back
+    # to the canonical temporary download URL.
+    try:
+        presentation = _seedr_data(
+            await seedr_request(f"/presentations/file/{quote(file_id)}/video")
+        )
+        if isinstance(presentation, dict):
+            link = presentation.get("link") if isinstance(presentation.get("link"), dict) else {}
+            url = str(
+                presentation.get("url")
+                or presentation.get("stream_url")
+                or presentation.get("streamUrl")
+                or link.get("url")
+                or ""
+            )
+            if url:
+                return {"url": url, "name": str(presentation.get("name") or "")}
+    except Exception:
+        pass
+
+    payload = _seedr_data(await seedr_request(f"/download/file/{quote(file_id)}/url"))
     if isinstance(payload, dict):
-        url = str(payload.get("url") or payload.get("download_url") or payload.get("downloadUrl") or payload.get("direct_url") or "")
+        url = str(
+            payload.get("url")
+            or payload.get("download_url")
+            or payload.get("downloadUrl")
+            or payload.get("direct_url")
+            or payload.get("directUrl")
+            or ""
+        )
         name = str(payload.get("name") or payload.get("filename") or "")
     else:
         url, name = str(payload or ""), ""
