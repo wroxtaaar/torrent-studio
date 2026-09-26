@@ -657,7 +657,7 @@ export default function App() {
     }
   };
 
-  const handleDeleteSeedrFolder = async (folderId: string, folderName: string) => {
+  const handleDeleteSeedrFolder = async (folderId: string) => {
     try {
       await api.deleteSeedrFolder(folderId);
       setSeedrFiles(prev => prev.filter(item => item.folderId !== folderId));
@@ -1223,7 +1223,7 @@ export default function App() {
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => handleDeleteSeedrFolder(folder.folderId, folder.name)}
+                                  onClick={() => handleDeleteSeedrFolder(folder.folderId)}
                                   className="p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200 transition"
                                   title="Delete Seedr folder"
                                 >
