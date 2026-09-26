@@ -437,7 +437,16 @@ export default function App() {
   }, [currentFolder]);
 
   // Actions
-  const handleSearchAdd = async (source: string, size: number, title: string) => {
+  const handleSearchAdd = async (source: string, size: number, title: string, infoHash?: string) => {
+    // Prowlarr search results can expose a .torrent URL rather than a magnet.
+    // Seedr's task API requires a magnet, so use the result's info hash when
+    // available. Keep an existing magnet URL unchanged.
+    const seedrSource =
+      source.trim().toLowerCase().startsWith('magnet:?')
+        ? source
+        : infoHash
+          ? `magnet:?xt=urn:btih:${infoHash.trim()}`
+          : source;
     if (seedrDownloadActive) {
       setSeedrAddBlockedNotice(
         'A Seedr download is already in progress. Free Seedr accounts allow one parallel download. Wait for it to finish before adding another magnet link.'
@@ -455,7 +464,7 @@ export default function App() {
         const quota = await api.getSeedrQuota();
         if (quota.configured && size < quota.remainingSpace) {
           const result = await api.addMagnet(
-            source,
+            seedrSource,
             'Downloads',
             undefined,
             undefined,
