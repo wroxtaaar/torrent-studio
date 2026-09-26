@@ -1209,8 +1209,38 @@ async def _seedr_task(task_id: str) -> Any:
 
 
 async def _seedr_task_contents(task_id: str) -> list[dict[str, Any]]:
-    payload = await seedr_request(f"/tasks/{quote(str(task_id))}/contents")
-    return [_seedr_file(item) for item in _seedr_array(payload, ("files", "items"))]
+    payload = _seedr_data(await seedr_request(f"/tasks/{quote(str(task_id))}/contents"))
+    if not isinstance(payload, dict):
+        return []
+
+    raw_files = _seedr_array(payload, ("files", "items"))
+    normalized = [_seedr_file(item) for item in raw_files]
+
+    # Seedr's task-contents response may expose file metadata without the
+    # permanent filesystem file id. Once the task has completed, the
+    # task-created folder contains the same files with their real ids.
+    # Follow that folder so downloads and playback can resolve the file.
+    missing_id = any(not item.get("id") for item in normalized)
+    folder_created_id = str(payload.get("folder_created_id") or "").strip()
+    if folder_created_id and (missing_id or not normalized):
+        try:
+            folder_payload = _seedr_data(
+                await seedr_request(
+                    f"/fs/folder/{quote(folder_created_id)}/contents"
+                )
+            )
+            folder_files = _seedr_array(folder_payload, ("files", "items"))
+            if folder_files:
+                return [
+                    _seedr_file(item, folder_created_id)
+                    for item in folder_files
+                ]
+        except HTTPException:
+            # Keep the task-contents metadata if the folder is temporarily
+            # unavailable. The caller can retry on the next poll.
+            pass
+
+    return normalized
 
 
 async def _seedr_download_url(file_id: str) -> dict[str, str]:
