@@ -1573,7 +1573,7 @@ async def _seedr_folder_name(folder_id: str) -> str:
             await seedr_request(f"/fs/folder/{quote(folder_id)}/contents")
         )
     except HTTPException:
-        return {}
+        return ""
 
     def direct_name(value: Any) -> str:
         if not isinstance(value, dict):
