@@ -1,32 +1,31 @@
-FROM node:22-bookworm-slim AS frontend-build
+FROM node:22-bookworm-slim AS build
 WORKDIR /app
 
 COPY package*.json ./
 RUN npm ci
-RUN npm install --no-save --package-lock=false webtorrent@3.0.21
 
 COPY . .
 RUN npm run build
 
-FROM python:3.12-slim
-WORKDIR /app
-
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV NODE_ENV=production
-ENV PORT=3000
-
+FROM node:22-bookworm-slim
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ffmpeg \
   && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=3000
 
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY --from=build /app/package*.json ./
+# tsx is a devDependency but is the runtime for server.ts in this image.
+# Install dev dependencies in the runtime image so startup does not invoke
+# npx to download tsx on every container restart.
+RUN npm ci --include=dev
 
-COPY backend ./backend
-COPY --from=frontend-build /app/dist ./dist
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/server.ts ./server.ts
+COPY --from=build /app/src ./src
 
-RUN mkdir -p /app/storage/downloads /app/storage/meta /app/storage/stream-cache /app/storage/hls-cache
+RUN mkdir -p /app/storage/downloads /app/storage/temp
 
 EXPOSE 3000
-CMD ["python", "-m", "backend.main"]
+CMD ["./node_modules/.bin/tsx", "server.ts"]
