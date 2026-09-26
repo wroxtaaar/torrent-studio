@@ -183,7 +183,7 @@ export const api = {
     const res = await fetch('/api/v2/torrents/add', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ urls, category, selectedFiles, manifest, existingHash, forceBackend, selectedNames })
+      body: JSON.stringify({ urls, category, selectedFiles, manifest, existingHash, forceBackend, selectedNames, seedrTaskId })
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
