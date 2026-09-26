@@ -437,20 +437,26 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
 
         // Multi-file direct magnets reach here only after the user presses
         // the confirmation button. The prepared Seedr task is then resumed.
+        const selected = inspectedFiles.filter(file => file.selected);
+        if (selected.length === 0) {
+          setError('Select at least one file to download.');
+          return;
+        }
+
         const manifest = inspectedFiles.map(file => ({
           name: file.name,
           size: file.size,
-          priority: 1
+          priority: file.selected ? 1 : 0
         }));
 
         await onAdd(
           magnetInput.trim(),
           category,
-          inspectedFiles.map(file => file.index),
+          selected.map(file => file.index),
           manifest,
           undefined,
           'seedr',
-          inspectedFiles.map(file => file.name)
+          selected.map(file => file.name)
         );
 
         setSeedrPreparedTaskId(null);
