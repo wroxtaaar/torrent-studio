@@ -1319,6 +1319,7 @@ async def seedr_quota():
         return 0
 
     max_space = first_number(
+        result.get("space_max"),
         storage.get("limit"),
         storage.get("max_space"),
         storage.get("maxSpace"),
@@ -1330,6 +1331,7 @@ async def seedr_quota():
         result.get("space"),
     )
     used_space = first_number(
+        result.get("space_used"),
         storage.get("used"),
         storage.get("used_space"),
         storage.get("usedSpace"),
@@ -1340,6 +1342,7 @@ async def seedr_quota():
     )
 
     remaining_candidates = [
+        result.get("space_remaining"),
         storage.get("remaining"),
         storage.get("remaining_space"),
         storage.get("remainingSpace"),
