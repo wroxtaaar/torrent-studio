@@ -1212,6 +1212,7 @@ export default function App() {
               {seedrConfigured && seedrFiles.length > 0 && (
                 <div className="mt-3">
                   {selectedSeedrFolderId === null ? (
+                    <>
                     {singleSeedrFiles.length > 0 && (
                       <div className="grid grid-cols-1 gap-2 mb-2">
                         {singleSeedrFiles.map(file => (
@@ -1304,6 +1305,7 @@ export default function App() {
                       ))}
                     </div>
                     )}
+                    </>
                   ) : (
                     (() => {
                       const folder = seedrFolderGroups.find(item => item.folderId === selectedSeedrFolderId);
