@@ -1,7 +1,7 @@
 import bencode from 'bencode';
 import crypto from 'crypto';
 import type { Express, Request, Response, NextFunction } from 'express';
-import { addSeedrTask, canUseSeedr, getSeedrTaskStatus, getSeedrFileDownload, getSeedrFilePresentation, deleteSeedrFile, isSeedrConfigured, listSeedrLibrary, seedrMaxSizeBytes } from './seedr.ts';
+import { addSeedrTask, canUseSeedr, getSeedrTaskStatus, getSeedrFileDownload, getSeedrFilePresentation, deleteSeedrFile, deleteSeedrFolder, isSeedrConfigured, listSeedrLibrary, seedrMaxSizeBytes } from './seedr.ts';
 
 type QbtConfig = {
   baseUrl: string;
@@ -573,12 +573,31 @@ export function installQbtProxy(app: Express) {
       }
       if (!isSeedrConfigured()) return res.status(503).json({ error: 'Seedr is not configured' });
 
-      const result = await getSeedrFilePresentation(fileId, type);
+      const fileName = String(req.query.name || '').trim();
+      if (!fileName) return res.status(400).json({ error: 'name is required' });
+
+      const result = await getSeedrFilePresentation(fileName, type);
       return res.json(result);
     } catch (error: any) {
       console.error('[SEEDR] Stream URL failed:', error?.message || error);
       return res.status(Number(error?.status) || 502).json({
         error: error?.message || 'Seedr stream URL failed'
+      });
+    }
+  });
+
+  app.delete('/api/seedr/folders/:folderId', async (req: Request, res: Response) => {
+    try {
+      const folderId = String(req.params.folderId || '').trim();
+      if (!folderId) return res.status(400).json({ error: 'folderId is required' });
+      if (!isSeedrConfigured()) return res.status(503).json({ error: 'Seedr is not configured' });
+
+      await deleteSeedrFolder(folderId);
+      return res.status(204).end();
+    } catch (error: any) {
+      console.error('[SEEDR] Folder delete failed:', error?.message || error);
+      return res.status(Number(error?.status) || 502).json({
+        error: error?.message || 'Seedr folder delete failed'
       });
     }
   });
