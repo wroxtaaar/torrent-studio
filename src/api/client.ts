@@ -170,7 +170,13 @@ export const api = {
       try {
         const parsed = JSON.parse(body);
         message = parsed.error || parsed.message || body;
-      } catch {
+        if (parsed?.code) {
+          const error = new Error(message || 'Failed to add magnet link');
+          Object.assign(error, parsed);
+          throw error;
+        }
+      } catch (parseError) {
+        if (parseError instanceof Error && (parseError as any).code) throw parseError;
         // qBittorrent may return plain text.
       }
       throw new Error(message || `Failed to add magnet link (${res.status})`);
