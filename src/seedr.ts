@@ -811,19 +811,19 @@ export async function listSeedrLibrary(): Promise<SeedrLibraryFile[]> {
       .filter(Boolean)
   )];
 
-  if (!folderIds.length) {
-    return [];
-  }
+  // Read the configured Torrent Studio parent folder as well as task-created
+  // folders. Seedr can expose completed files in either location.
+  const folderSources = [SEEDR_LIBRARY_FOLDER_ID, ...folderIds];
 
   const results = await mapWithConcurrency(
-    folderIds,
+    [...new Set(folderSources)],
     4,
     folderId => collectSeedrFiles(folderId, '/Torrent Studio')
   );
 
   const seen = new Set<string>();
   return results.flat().filter(file => {
-    const key = file.id || `${file.folderId}:${file.name}`;
+    const key = file.id || `${file.folderId}:${file.folderPath}:${file.name}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
