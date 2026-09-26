@@ -1558,6 +1558,34 @@ async def _seedr_task(task_id: str) -> Any:
     return await seedr_request(f"/tasks/{quote(str(task_id))}")
 
 
+async def _seedr_task_from_list(task_id: str) -> dict[str, Any]:
+    """Find the task in Seedr's transfer list when the detail endpoint omits metadata."""
+    target = str(task_id or "").strip()
+    if not target:
+        return {}
+
+    try:
+        payload = await seedr_request("/tasks")
+    except HTTPException:
+        return {}
+
+    for raw in _seedr_array(payload, ("tasks", "torrents")):
+        item = _seedr_data(raw)
+        if not isinstance(item, dict):
+            continue
+        candidate = str(
+            item.get("user_torrent_id")
+            or item.get("id")
+            or item.get("task_id")
+            or item.get("torrent_id")
+            or ""
+        ).strip()
+        if candidate == target:
+            return item
+
+    return {}
+
+
 async def _seedr_task_contents(task_id: str) -> list[dict[str, Any]]:
     payload = _seedr_data(await seedr_request(f"/tasks/{quote(str(task_id))}/contents"))
     if not isinstance(payload, dict):
@@ -1947,6 +1975,27 @@ async def seedr_task(task_id: str):
         if isinstance(raw_task, dict) and isinstance(raw_task.get("task"), dict)
         else (raw_task if isinstance(raw_task, dict) else {})
     )
+
+    # Seedr's /tasks/{id} response can contain live state/progress without the
+    # torrent title. The list endpoint usually has the display name, so merge
+    # it in to keep Torrent Studio's active download card useful even after a
+    # page refresh or when the task was created before the latest frontend fix.
+    task_name = str(
+        task.get("name")
+        or task.get("title")
+        or task.get("torrent_name")
+        or ""
+    ).strip()
+    if not task_name:
+        listed_task = await _seedr_task_from_list(task_id)
+        if listed_task:
+            task = {**listed_task, **task}
+            if isinstance(raw_task, dict) and isinstance(raw_task.get("task"), dict):
+                task["task"] = {
+                    **listed_task,
+                    **raw_task.get("task"),
+                }
+
     progress, task = await _seedr_progress(task_id, task)
     complete = _seedr_task_complete(task) or progress >= 100
     name = str(
