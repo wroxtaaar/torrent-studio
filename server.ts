@@ -10,6 +10,7 @@ import https from 'https';
 import * as archiver from 'archiver';
 import * as bencode from 'bencode';
 import { installQbtProxy } from './src/qbtProxy.ts';
+import { search1337x } from './src/search1337x.ts';
 import type {
   StorageFile, StorageFolder, UserProfile, StorageStats,
   ActivityLog, AppNotification, CleanupSettings, QbtSettings
@@ -402,80 +403,13 @@ async function qbtJson(pathname: string, init: RequestInit = {}) {
   try { return text ? JSON.parse(text) : null; } catch { return text; }
 }
 
-async function searchTorrentIndexer(query: string, limit = 10, offset = 0) {
-  if (!prowlarrApiKey) {
-    throw Object.assign(
-      new Error('Torrent search is not configured. Set PROWLARR_API_KEY in .env.'),
-      { status: 503 }
-    );
-  }
+async function searchTorrentIndexer(query: string, limit = 10, _offset = 0) {
+  const results = await search1337x(query, limit);
 
-  const url = new URL('/api/v1/search', prowlarrBase);
-  url.searchParams.set('query', query);
-  url.searchParams.set('type', 'search');
-  url.searchParams.set('limit', String(Math.min(Math.max(limit, 1), 10)));
-  url.searchParams.set('offset', String(Math.max(offset, 0)));
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30000);
-
-  try {
-    const response = await fetch(url, {
-      headers: {
-        'Accept': 'application/json',
-        'X-Api-Key': prowlarrApiKey,
-      },
-      signal: controller.signal,
-    });
-
-    const text = await response.text();
-    if (!response.ok) {
-      let message = text || response.statusText;
-      try {
-        const parsed = text ? JSON.parse(text) : null;
-        message = parsed?.message || parsed?.error || message;
-      } catch {}
-      throw Object.assign(new Error(message || 'Prowlarr search failed'), { status: response.status });
-    }
-
-    let releases: any[] = [];
-    try {
-      const parsed = text ? JSON.parse(text) : [];
-      releases = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.results) ? parsed.results : [];
-    } catch {
-      throw Object.assign(new Error('Prowlarr returned an invalid search response.'), { status: 502 });
-    }
-
-    return releases
-      .filter((release: any) => String(release.protocol || 'torrent').toLowerCase() !== 'usenet')
-      .map((release: any) => {
-        const magnetUrl = String(release.magnetUrl || release.magneturl || '').trim();
-        const downloadUrl = String(release.downloadUrl || release.downloadurl || '').trim();
-        const sourceUrl = magnetUrl || (
-          downloadUrl
-            ? createTorrentSearchGrab(downloadUrl, query, String(release.guid || ''))
-            : ''
-        );
-        return {
-          guid: release.guid,
-          title: String(release.title || release.sortTitle || 'Untitled'),
-          size: Number(release.size || 0),
-          seeders: Number(release.seeders || 0),
-          leechers: Number(release.leechers || release.leecherCount || 0),
-          indexer: String(release.indexer || ''),
-          protocol: String(release.protocol || ''),
-          publishDate: release.publishDate || undefined,
-          infoHash: String(release.infoHash || ''),
-          magnetUrl: magnetUrl || undefined,
-          // Never expose Prowlarr's API key-bearing downloadUrl to the browser.
-          downloadUrl: undefined,
-          infoUrl: String(release.infoUrl || '').trim() || undefined,
-          sourceUrl: sourceUrl || undefined,
-        };
-      });
-  } finally {
-    clearTimeout(timer);
-  }
+  return results.map((release: any) => ({
+    ...release,
+    downloadUrl: undefined,
+  }));
 }
 
 function createTorrentSearchGrab(url: string, query?: string, guid?: string): string {
