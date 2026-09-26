@@ -1928,10 +1928,13 @@ async def seedr_task(task_id: str):
         raw_task = _seedr_data(await _seedr_task(task_id))
     except HTTPException as exc:
         if exc.status_code == 404:
+            # The Seedr task is gone. Returning "waiting" makes the frontend
+            # poll the same stale task forever and persist it in localStorage.
+            # Surface a terminal missing-task state so the UI can clear it.
             return {
                 "taskId": task_id,
                 "name": "",
-                "status": "waiting",
+                "status": "not_found",
                 "progress": 0,
                 "task": None,
                 "files": [],
