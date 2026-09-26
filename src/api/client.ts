@@ -178,6 +178,30 @@ export const api = {
   },
 
 
+  async getSeedrFiles(): Promise<{
+    configured: boolean;
+    files: Array<{ id: string; name: string; size: number; folderId: string; folderPath: string }>;
+  }> {
+    const res = await fetch('/api/seedr/files');
+    const body = await res.text();
+    let data: any = null;
+    try { data = body ? JSON.parse(body) : null; } catch { data = null; }
+    if (!res.ok) throw new Error(data?.error || body || 'Failed to fetch Seedr files');
+    return {
+      configured: Boolean(data?.configured),
+      files: Array.isArray(data?.files) ? data.files : [],
+    };
+  },
+
+  async getSeedrFileDownload(fileId: string): Promise<{ url: string; name: string }> {
+    const res = await fetch('/api/seedr/files/' + encodeURIComponent(fileId) + '/download');
+    const body = await res.text();
+    let data: any = null;
+    try { data = body ? JSON.parse(body) : null; } catch { data = null; }
+    if (!res.ok) throw new Error(data?.error || body || 'Failed to create Seedr download link');
+    return data;
+  },
+
   async getSeedrTask(taskId: number | string): Promise<{
     taskId: number | string;
     status: 'waiting' | 'downloading' | 'completed';
