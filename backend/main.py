@@ -401,6 +401,64 @@ async def torrents_delete(body: dict[str, Any]):
     return await qbt.delete(str(body.get("hashes") or body.get("hash") or ""), bool(body.get("deleteFiles", False)))
 
 
+@app.post("/api/search/torrents/add")
+async def search_torrent_add(body: dict[str, Any]):
+    source = str(body.get("source") or "").strip()
+    info_hash = str(body.get("infoHash") or "").strip().lower()
+    size = int(body.get("size") or 0)
+
+    if size <= 0:
+        return {"added": False, "reason": "unknown_size"}
+
+    if info_hash and re.fullmatch(r"[a-f0-9]{40}", info_hash):
+        seedr_magnet = f"magnet:?xt=urn:btih:{info_hash}"
+    elif re.match(r"^magnet:\?", source, re.IGNORECASE):
+        seedr_magnet = source
+    else:
+        return {"added": False, "reason": "no_magnet_or_info_hash"}
+
+    if not SEEDR_TOKEN or not SEEDR_LIBRARY_FOLDER_ID.isdigit():
+        return {"added": False, "reason": "seedr_unavailable"}
+
+    quota = _seedr_data(await seedr_request("/me/quota"))
+    if not isinstance(quota, dict):
+        return {"added": False, "reason": "invalid_quota"}
+
+    def number(value: Any) -> int:
+        try:
+            return max(0, int(float(value))) if value not in (None, "") else 0
+        except (TypeError, ValueError):
+            return 0
+
+    remaining = number(quota.get("space_remaining") or quota.get("remainingSpace"))
+    if remaining == 0:
+        remaining = max(0, number(quota.get("space_max")) - number(quota.get("space_used")))
+
+    if size >= remaining:
+        return {"added": False, "reason": "insufficient_space", "remainingSpace": remaining}
+
+    normalized = _seedr_normalize_magnet(seedr_magnet)
+    info_hash = _seedr_info_hash(normalized)
+    if not info_hash:
+        return {"added": False, "reason": "invalid_magnet"}
+
+    result = await _seedr_find_task_by_hash(info_hash)
+    if not result:
+        result = await _seedr_add_task(normalized, int(SEEDR_LIBRARY_FOLDER_ID))
+
+    task_id = str(result.get("user_torrent_id") or result.get("id") or result.get("task_id") or "")
+    if not task_id:
+        raise HTTPException(502, "Seedr did not return a task id")
+
+    return {
+        "added": True,
+        "backend": "seedr",
+        "seedrTaskId": int(task_id) if task_id.isdigit() else task_id,
+        "seedrResponse": result,
+        "remainingSpace": remaining,
+    }
+
+
 @app.post("/api/v2/torrents/add")
 async def torrents_add(body: dict[str, Any]):
     urls = str(body.get("urls") or "").strip()
