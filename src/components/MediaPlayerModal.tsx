@@ -111,7 +111,7 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
     media.addEventListener('loadedmetadata', handleLoaded, { once: true });
 
     let hls: Hls | null = null;
-    const isHlsStream = /\\.m3u8(?:$|\\?)/i.test(streamUrl);
+    const isHlsStream = /\.m3u8(?:$|\?)/i.test(streamUrl);
 
     if (isHlsStream && isVideo && Hls.isSupported()) {
       hls = new Hls({
