@@ -38,6 +38,9 @@ LOGS_FILE = META_DIR / "logs.json"
 NOTIFICATIONS_FILE = META_DIR / "notifications.json"
 CLEANUP_FILE = META_DIR / "cleanup.json"
 RECENT_SEARCHES_FILE = META_DIR / "recent-searches.json"
+SEARCH_CACHE_FILE = META_DIR / "search-cache.json"
+SEARCH_CACHE_TTL_SECONDS = int(os.getenv("SEARCH_CACHE_TTL_SECONDS", "900"))
+SEARCH_CACHE_MAX_ENTRIES = 50
 
 
 def read_json(path: Path, fallback: Any) -> Any:
@@ -593,13 +596,56 @@ async def prowlarr_search(query: str, limit: int) -> list[dict[str, Any]]:
 
 @app.get("/api/search/torrents")
 async def search_torrents(q: str = "", limit: int = 10):
-    query = q.strip()
+    query = " ".join(q.strip().split())
     if not query:
         return {"results": []}
+
+    # Cache successful Prowlarr searches so repeated queries do not hit every
+    # indexer again. The cache is persisted in /storage/meta and survives app
+    # restarts/deployments when the existing app-meta volume is retained.
+    cache_key = f"{query.lower()}::{min(max(limit, 1), 50)}"
+    now = time.time()
+    cache = read_json(SEARCH_CACHE_FILE, {})
+    if not isinstance(cache, dict):
+        cache = {}
+
+    cached = cache.get(cache_key)
+    if isinstance(cached, dict):
+        cached_at = float(cached.get("cachedAt") or 0)
+        cached_results = cached.get("results")
+        if now - cached_at < SEARCH_CACHE_TTL_SECONDS and isinstance(cached_results, list):
+            searches = read_json(RECENT_SEARCHES_FILE, [])
+            write_json(RECENT_SEARCHES_FILE, [query] + [x for x in searches if x != query][:9])
+            return {"results": cached_results, "cached": True}
+
     result = await prowlarr_search(query, limit)
+
+    cache[cache_key] = {
+        "cachedAt": now,
+        "results": result,
+    }
+
+    # Keep the newest entries only so search caching cannot grow without
+    # bounds. Expired entries are discarded while we trim the cache.
+    fresh_cache = {}
+    for key, entry in sorted(
+        cache.items(),
+        key=lambda item: float(item[1].get("cachedAt") or 0)
+        if isinstance(item[1], dict) else 0,
+        reverse=True,
+    ):
+        if not isinstance(entry, dict):
+            continue
+        cached_at = float(entry.get("cachedAt") or 0)
+        if now - cached_at < SEARCH_CACHE_TTL_SECONDS:
+            fresh_cache[key] = entry
+        if len(fresh_cache) >= SEARCH_CACHE_MAX_ENTRIES:
+            break
+    write_json(SEARCH_CACHE_FILE, fresh_cache)
+
     searches = read_json(RECENT_SEARCHES_FILE, [])
     write_json(RECENT_SEARCHES_FILE, [query] + [x for x in searches if x != query][:9])
-    return {"results": result}
+    return {"results": result, "cached": False}
 
 
 @app.get("/api/files")
