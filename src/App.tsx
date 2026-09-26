@@ -114,6 +114,8 @@ export default function App() {
     downloadUrl: string | null;
     files: Array<{ id: string; name: string; size: number; url: string | null }>;
     seedrReply: string;
+    source: string;
+    metadataReady: boolean;
   };
 
   const seedrNoticeStorageKey = 'seedflow_seedr_notice';
@@ -131,6 +133,8 @@ export default function App() {
         downloadUrl: typeof parsed.downloadUrl === 'string' ? parsed.downloadUrl : null,
         files: Array.isArray(parsed.files) ? parsed.files : [],
         seedrReply: String(parsed.seedrReply || ''),
+        source: String(parsed.source || ''),
+        metadataReady: Boolean(parsed.metadataReady),
       };
     } catch {
       return null;
@@ -472,6 +476,8 @@ export default function App() {
             const state = response?.state ?? response?.task?.state ?? response?.status ?? response?.task?.status;
             return state ? `Seedr replied: ${String(state)}` : 'Seedr replied: task accepted';
           })(),
+          source: magnet,
+          metadataReady: false,
         });
       } else {
         setSeedrNotice(null);
@@ -543,12 +549,20 @@ export default function App() {
         if (!active) return;
 
         const progress = Number(result.progress) || 0;
-        const completed = result.status === 'completed' || progress >= 100;
+        const completed = result.status === 'completed';
 
         setSeedrNotice(prev => {
           if (!prev) return null;
           return {
             ...prev,
+            name: prev.metadataReady
+              ? prev.name
+              : String(
+                  (result as any).task?.name ??
+                  (result as any).task?.title ??
+                  (result as any).task?.torrent_name ??
+                  prev.name
+                ),
             status: completed ? 'completed' : result.status,
             progress: completed ? 100 : progress,
             downloadUrl: result.downloadUrl,
@@ -574,6 +588,48 @@ export default function App() {
       if (timeoutId !== null) window.clearTimeout(timeoutId);
     };
   }, [seedrNotice?.taskId, seedrNotice?.status]);
+
+  // Direct Seedr adds return immediately. In parallel, use qBittorrent only
+  // as a temporary metadata probe so the UI can learn the real torrent name.
+  // The probe is deleted after metadata is found and never starts downloading.
+  useEffect(() => {
+    if (!seedrNotice?.taskId || !seedrNotice.source || seedrNotice.metadataReady) return;
+
+    let active = true;
+    let retryTimer: number | null = null;
+
+    const resolveMetadata = async () => {
+      try {
+        const data = await api.inspectMagnet(seedrNotice.source, 'Downloads');
+        if (!active) return;
+
+        const name = String(data?.name || '').trim();
+        if (name && name !== 'Torrent') {
+          setSeedrNotice(prev => prev ? {
+            ...prev,
+            name,
+            metadataReady: true,
+          } : null);
+
+          if (data.createdPreview && data.hash) {
+            await api.deleteTorrent(String(data.hash), false).catch(() => undefined);
+          }
+          return;
+        }
+
+        retryTimer = window.setTimeout(resolveMetadata, 2000);
+      } catch {
+        if (active) retryTimer = window.setTimeout(resolveMetadata, 3000);
+      }
+    };
+
+    void resolveMetadata();
+
+    return () => {
+      active = false;
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+    };
+  }, [seedrNotice?.taskId, seedrNotice?.source, seedrNotice?.metadataReady]);
 
   const handleStreamTorrent = (torrent: TorrentItem) => {
     const streamableFile = torrent.files?.find(file => {
@@ -1170,7 +1226,7 @@ export default function App() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="font-bold">
-                      {seedrNotice.status === 'completed' ? 'File downloaded' : 'Downloading with Seedr'}
+                      {seedrNotice.status === 'completed' ? 'Seedr download complete' : 'Seedr download accepted'}
                     </div>
                     <div className="text-emerald-400/80 mt-0.5 truncate">{seedrNotice.name}</div>
                     {seedrNotice.status !== 'completed' && (
