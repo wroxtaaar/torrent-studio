@@ -10,7 +10,6 @@ import https from 'https';
 import * as archiver from 'archiver';
 import * as bencode from 'bencode';
 import { installQbtProxy } from './src/qbtProxy.ts';
-import { resolveTorrentMetadata } from './src/torrentMetadata.ts';
 import type {
   StorageFile, StorageFolder, UserProfile, StorageStats,
   ActivityLog, AppNotification, CleanupSettings, QbtSettings
@@ -1092,23 +1091,6 @@ async function main() {
   app.use((_req,res,next)=>{ res.setHeader('X-Powered-By','Torrent-Studio'); next(); });
 
   installQbtProxy(app);
-
-  app.post('/api/torrents/metadata', async (req, res) => {
-    try {
-      const magnet = String(req.body?.magnet || '').trim();
-      if (!/^magnet:\?/i.test(magnet)) {
-        return res.status(400).json({ error: 'A magnet link is required.' });
-      }
-
-      const metadata = await resolveTorrentMetadata(magnet);
-      return res.json(metadata);
-    } catch (error: any) {
-      console.error('[TORRENT-METADATA]', error?.message || error);
-      return res.status(Number(error?.status) || 502).json({
-        error: error?.message || 'Unable to resolve torrent metadata'
-      });
-    }
-  });
 
   app.get('/api/search/torrents/grab/:token', async (req,res)=>{
     purgeExpiredTorrentSearchGrabs();
