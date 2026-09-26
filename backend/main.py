@@ -1632,8 +1632,16 @@ async def _seedr_progress(task_id: str, task: dict[str, Any]) -> tuple[float, di
     try:
         result = _seedr_data(await seedr_request(f"/tasks/{quote(str(task_id))}/progress"))
         progress_url = ""
-        if isinstance(result, dict):
-            progress_url = str(result.get("url") or result.get("progress_url") or result.get("progressUrl") or "")
+        if isinstance(result, str):
+            # Seedr may return the polling URL directly as a JSON string.
+            progress_url = result.strip().strip('"')
+        elif isinstance(result, dict):
+            progress_url = str(
+                result.get("url")
+                or result.get("progress_url")
+                or result.get("progressUrl")
+                or ""
+            )
         if progress_url:
             async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
                 response = await client.get(
