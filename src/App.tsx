@@ -543,7 +543,8 @@ export default function App() {
     existingHash?: string,
     forceBackend?: 'seedr' | 'qbittorrent',
     selectedNames?: string[],
-    seedrTaskId?: number | string
+    seedrTaskId?: number | string,
+    torrentName?: string
   ) => {
     try {
       if (seedrDownloadActive && forceBackend !== 'qbittorrent') {
@@ -554,7 +555,17 @@ export default function App() {
         throw error;
       }
 
-      const result = await api.addMagnet(magnet, category, selectedFiles, manifest, existingHash, forceBackend, selectedNames, seedrTaskId);
+      const result = await api.addMagnet(
+        magnet,
+        category,
+        selectedFiles,
+        manifest,
+        existingHash,
+        forceBackend,
+        selectedNames,
+        seedrTaskId,
+        torrentName
+      );
       if (result.backend === 'seedr') {
         setSeedrNotice({
           taskId: result.seedrTaskId ?? null,
@@ -576,7 +587,11 @@ export default function App() {
 
             return 'Waiting for Seedr metadata…';
           })(),
-          folderName: String((result as any).seedrFolderName ?? '').trim(),
+          folderName: String(
+            (result as any).seedrFolderName ??
+            torrentName ??
+            ''
+          ).trim(),
           folderId: String((result as any).seedrFolderId ?? '').trim(),
           status: 'waiting',
           progress: 0,
