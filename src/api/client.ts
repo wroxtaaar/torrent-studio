@@ -83,6 +83,27 @@ export const api = {
     if (!res.ok) throw new Error('Failed to set file priority');
   },
 
+  async getTorrentMetadata(magnet: string): Promise<{
+    name: string;
+    infoHash: string;
+    files: { index: number; name: string; size: number; path: string; type: string; priority: number }[];
+    totalSize: number;
+    elapsedMs: number;
+  }> {
+    const res = await fetch('/api/torrents/metadata', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ magnet })
+    });
+    const body = await res.text();
+    let data: any = null;
+    try { data = body ? JSON.parse(body) : null; } catch {}
+    if (!res.ok) {
+      throw new Error(data?.error || body || 'Torrent metadata lookup failed');
+    }
+    return data;
+  },
+
   async inspectMagnet(magnet: string, category = 'Downloads'): Promise<{
     name: string;
     hash: string;
