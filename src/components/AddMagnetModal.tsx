@@ -457,19 +457,21 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       setIsLoading(true);
       setError('');
       let selectedBackend: 'seedr' | 'qbittorrent' | undefined;
-      if (isDirectSeedrSource) {
-        try {
-          const quota = await api.getSeedrQuota();
-          if (
-            quota.configured &&
-            totalSelectedSize > 0 &&
-            totalSelectedSize < quota.remainingSpace
-          ) {
-            selectedBackend = 'seedr';
-          }
-        } catch {
-          // Quota lookup is best-effort; qBittorrent remains the fallback.
+      try {
+        // Once the user has selected the files, the selected size—not the
+        // aggregate torrent size—determines whether Seedr can handle it.
+        // This applies to pasted magnets, search/grab links, and other
+        // sources that qBittorrent can inspect and resolve to an info hash.
+        const quota = await api.getSeedrQuota();
+        if (
+          quota.configured &&
+          totalSelectedSize > 0 &&
+          totalSelectedSize < quota.remainingSpace
+        ) {
+          selectedBackend = 'seedr';
         }
+      } catch {
+        // Quota lookup is best-effort; qBittorrent remains the fallback.
       }
 
       const downloadSource =
