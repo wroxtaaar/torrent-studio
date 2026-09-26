@@ -1597,6 +1597,20 @@ export default function App() {
                               {folder.folderId !== '__root__' && folder.folderId !== '__active_seedr__' && <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />}
                             </button>
 
+                            {folder.active && (
+                              <div className="shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => void handleCancelSeedrDownload()}
+                                  disabled={isCancellingSeedr || seedrNotice?.taskId == null}
+                                  className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/25 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200 disabled:opacity-40 disabled:cursor-not-allowed text-[10px] font-bold transition"
+                                  title="Cancel Seedr download"
+                                >
+                                  {isCancellingSeedr ? 'Cancelling…' : 'Cancel'}
+                                </button>
+                              </div>
+                            )}
+
                             {folder.folderId !== '__root__' && !folder.active && (
                               <div className="flex items-center gap-1.5 shrink-0">
                                 <button
