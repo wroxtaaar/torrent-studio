@@ -1585,9 +1585,16 @@ async def _seedr_file_details(file_id: str) -> dict[str, Any]:
 
 async def _seedr_progress(task_id: str, task: dict[str, Any]) -> tuple[float, dict[str, Any]]:
     # The task object can lag behind Seedr's dedicated live-progress endpoint.
-    # Always consult /progress first so the UI reflects the current download
-    # percentage, then fall back to the task's embedded progress on failure.
+    # Always consult /progress first for the freshest percentage, but never
+    # let a stale progress payload overwrite a terminal state from /tasks/:id.
     direct = _seedr_progress_value(task.get("progress"))
+
+    # /tasks/:id is authoritative for terminal state. If it already says the
+    # task is complete, report 100% immediately even when /progress still says
+    # 99% for a short time.
+    if _seedr_task_complete(task):
+        return 100.0, task
+
     try:
         result = _seedr_data(await seedr_request(f"/tasks/{quote(str(task_id))}/progress"))
         progress_url = ""
@@ -1613,11 +1620,19 @@ async def _seedr_progress(task_id: str, task: dict[str, Any]) -> tuple[float, di
                             pass
                 live_data = _seedr_data(progress_data)
                 merged = {**task, **(live_data if isinstance(live_data, dict) else {})}
+
+                # Preserve a terminal state from either source rather than
+                # allowing a stale "downloading" field to mask completion.
+                if _seedr_task_complete(merged):
+                    return 100.0, merged
+
                 value = _seedr_progress_value(merged)
                 if value is not None:
                     return min(100, max(0, value)), merged
 
         merged = {**task, **(result if isinstance(result, dict) else {})}
+        if _seedr_task_complete(merged):
+            return 100.0, merged
         value = _seedr_progress_value(merged)
         if value is not None:
             return min(100, max(0, value)), merged
