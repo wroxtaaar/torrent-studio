@@ -437,7 +437,53 @@ export default function App() {
   }, [currentFolder]);
 
   // Actions
-  const handleSearchAdd = (source: string) => {
+  const handleSearchAdd = async (source: string, size: number, title: string) => {
+    if (seedrDownloadActive) {
+      setSeedrAddBlockedNotice(
+        'A Seedr download is already in progress. Free Seedr accounts allow one parallel download. Wait for it to finish before adding another magnet link.'
+      );
+      setActiveTab('transfers');
+      window.setTimeout(() => setSeedrAddBlockedNotice(null), 5000);
+      return;
+    }
+
+    // Search results already provide the torrent size. If the whole torrent
+    // fits in the currently available Seedr quota, send it straight to
+    // Seedr without opening the qBittorrent metadata/file-selection flow.
+    if (size > 0) {
+      try {
+        const quota = await api.getSeedrQuota();
+        if (quota.configured && size < quota.remainingSpace) {
+          const result = await api.addMagnet(
+            source,
+            'Downloads',
+            undefined,
+            undefined,
+            undefined,
+            'seedr'
+          );
+
+          if (result.backend === 'seedr') {
+            setSeedrNotice({
+              taskId: result.seedrTaskId ?? null,
+              name: title || 'Seedr download',
+              status: 'waiting',
+              progress: 0,
+              downloadUrl: null,
+              files: [],
+              seedrReply: 'Seedr replied: task accepted',
+              selectionApplied: false,
+              selectionError: undefined,
+            });
+            setActiveTab('transfers');
+            return;
+          }
+        }
+      } catch (error) {
+        console.warn('Direct Seedr search add failed; opening normal add flow:', error);
+      }
+    }
+
     openAddMagnet(source);
   };
 
