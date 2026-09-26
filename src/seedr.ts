@@ -149,7 +149,7 @@ function normalizeFile(file: any, folderId = ''): any {
 function normalizeFolder(folder: any): any {
   return {
     id: numericId(folder?.id ?? folder?.folder_id),
-    name: String(folder?.name ?? folder?.title ?? 'Folder'),
+    name: String(folder?.name ?? folder?.title ?? folder?.path ?? 'Folder'),
   };
 }
 
@@ -220,8 +220,8 @@ function findQuotaValues(value: any, depth = 0): { maxSpace: number; usedSpace: 
 
 export async function getSeedrQuota(): Promise<SeedrQuota> {
   const livePaths = [
-    async () => legacyListSeedrFolder('0'),
     async () => seedrRequest('/me/quota'),
+    async () => seedrRequest('/fs/root/contents'),
     async () => seedrRequest('/fs/root/contents'),
     async () => seedrRequest('/fs/root'),
     async () => seedrRequest('/fs/path?path=%2F&contents=true')
@@ -294,34 +294,28 @@ export async function findSeedrTaskByHash(infoHash: string): Promise<any | null>
 }
 
 async function getFolderContents(folderId: string | number): Promise<any> {
-  try {
-    return await legacyListSeedrFolder(folderId);
-  } catch (legacyError) {
-    // Keep the documented v0.1 API as a fallback for accounts where the
-    // legacy OAuth resource endpoint is unavailable.
-    if (String(folderId) === '0') {
-      const rootPaths = [
-        '/fs/root/contents',
-        '/fs/root',
-        '/fs/path?path=%2F&contents=true'
-      ];
+  if (String(folderId) === '0') {
+    const rootPaths = [
+      '/fs/root/contents',
+      '/fs/root',
+      '/fs/path?path=%2F&contents=true'
+    ];
 
-      let lastError: unknown = legacyError;
-      for (const path of rootPaths) {
-        try {
-          return await seedrRequest(path);
-        } catch (error) {
-          lastError = error;
-        }
+    let lastError: unknown = null;
+    for (const path of rootPaths) {
+      try {
+        return await seedrRequest(path);
+      } catch (error) {
+        lastError = error;
       }
-
-      throw lastError instanceof Error
-        ? lastError
-        : new Error('Unable to read the Seedr root library');
     }
 
-    return seedrRequest(`/fs/folder/${encodeURIComponent(String(folderId))}/contents`);
+    throw lastError instanceof Error
+      ? lastError
+      : new Error('Unable to read the Seedr root library');
   }
+
+  return seedrRequest(`/fs/folder/${encodeURIComponent(String(folderId))}/contents`);
 }
 
 async function getFileDetails(fileId: string | number): Promise<any> {
