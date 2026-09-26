@@ -452,15 +452,14 @@ export default function App() {
 
   // Actions
   const handleSearchAdd = async (source: string, size: number, title: string, infoHash?: string) => {
-    // Prowlarr search results can expose a .torrent URL rather than a magnet.
-    // Seedr's task API requires a magnet, so use the result's info hash when
-    // available. Keep an existing magnet URL unchanged.
+    const trimmedSource = source.trim();
     const seedrSource =
-      source.trim().toLowerCase().startsWith('magnet:?')
-        ? source
+      trimmedSource.toLowerCase().startsWith('magnet:?')
+        ? trimmedSource
         : infoHash
           ? `magnet:?xt=urn:btih:${infoHash.trim()}`
           : '';
+
     if (seedrDownloadActive) {
       setSeedrAddBlockedNotice(
         'A Seedr download is already in progress. Free Seedr accounts allow one parallel download. Wait for it to finish before adding another magnet link.'
@@ -470,42 +469,29 @@ export default function App() {
       return;
     }
 
-    // Search results already provide the torrent size. If the whole torrent
-    // fits in the currently available Seedr quota, send it straight to
-    // Seedr only when we have a real magnet/info-hash. Some indexers expose
-    // only a .torrent/download URL; those must go through qBittorrent first
-    // so the hash can be discovered before handing the torrent to Seedr.
+    // Search results already contain the torrent size and usually the info
+    // hash. Let the backend check quota and add to Seedr in one request.
     if (size > 0 && seedrSource) {
       try {
-        const quota = await api.getSeedrQuota();
-        if (quota.configured && size < quota.remainingSpace) {
-          const result = await api.addMagnet(
-            seedrSource,
-            'Downloads',
-            undefined,
-            undefined,
-            undefined,
-            'seedr'
-          );
+        const result = await api.addSearchTorrent(trimmedSource, size, infoHash);
 
-          if (result.backend === 'seedr') {
-            setSeedrNotice({
-              taskId: result.seedrTaskId ?? null,
-              name: title || 'Seedr download',
-              status: 'waiting',
-              progress: 0,
-              downloadUrl: null,
-              files: [],
-              seedrReply: 'Seedr replied: task accepted',
-              selectionApplied: false,
-              selectionError: undefined,
-            });
-            setActiveTab('transfers');
-            return;
-          }
+        if (result.added && result.backend === 'seedr') {
+          setSeedrNotice({
+            taskId: result.seedrTaskId ?? null,
+            name: title || 'Seedr download',
+            status: 'waiting',
+            progress: 0,
+            downloadUrl: null,
+            files: [],
+            seedrReply: 'Seedr replied: task accepted',
+            selectionApplied: false,
+            selectionError: undefined,
+          });
+          setActiveTab('transfers');
+          return;
         }
       } catch (error) {
-        console.warn('Direct Seedr search add failed; opening normal add flow:', error);
+        console.warn('Fast search-to-Seedr add failed; opening normal add flow:', error);
       }
     }
 
