@@ -593,6 +593,18 @@ export default function App() {
     }
   }, [seedrNotice]);
 
+  // Completed Seedr notices are only a short-lived confirmation. Keep the
+  // transfer screen clean by removing the card automatically after 3 seconds.
+  useEffect(() => {
+    if (!seedrNotice?.taskId || seedrNotice.status !== 'completed') return;
+
+    const timeoutId = window.setTimeout(() => {
+      setSeedrNotice(null);
+    }, 3000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [seedrNotice?.taskId, seedrNotice?.status]);
+
   useEffect(() => {
     if (!seedrNotice?.taskId || seedrNotice.status === 'completed') return;
 
