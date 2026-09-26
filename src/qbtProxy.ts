@@ -548,6 +548,32 @@ export function installQbtProxy(app: Express) {
     }
   });
 
+  app.get('/api/seedr/quota', async (_req: Request, res: Response) => {
+    try {
+      if (!isSeedrConfigured()) {
+        return res.json({
+          configured: false,
+          maxSpace: 0,
+          usedSpace: 0,
+          remainingSpace: 0,
+        });
+      }
+
+      const quota = await getSeedrQuota();
+      return res.json({
+        configured: true,
+        maxSpace: quota.maxSpace,
+        usedSpace: quota.usedSpace,
+        remainingSpace: quota.remainingSpace,
+      });
+    } catch (error: any) {
+      console.error('[SEEDR] Quota request failed:', error?.message || error);
+      return res.status(Number(error?.status) || 502).json({
+        error: error?.message || 'Seedr quota request failed',
+      });
+    }
+  });
+
   app.get('/api/seedr/files', async (_req: Request, res: Response) => {
     try {
       if (!isSeedrConfigured()) {
