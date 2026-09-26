@@ -106,7 +106,34 @@ export default function App() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [qbtSettings, setQbtSettings] = useState<QbtSettings | null>(null);
   const [cleanupSettings, setCleanupSettings] = useState<CleanupSettings | null>(null);
-  const [seedrNotice, setSeedrNotice] = useState<{ taskId: number | string | null; name: string; status: 'waiting' | 'downloading' | 'completed'; progress: number; downloadUrl: string | null; files: Array<{ id: string; name: string; size: number; url: string | null }> } | null>(null);
+  type SeedrNotice = {
+    taskId: number | string | null;
+    name: string;
+    status: 'waiting' | 'downloading' | 'completed';
+    progress: number;
+    downloadUrl: string | null;
+    files: Array<{ id: string; name: string; size: number; url: string | null }>;
+  };
+
+  const seedrNoticeStorageKey = 'seedflow_seedr_notice';
+  const [seedrNotice, setSeedrNotice] = useState<SeedrNotice | null>(() => {
+    try {
+      const raw = window.localStorage.getItem(seedrNoticeStorageKey);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || parsed.taskId == null) return null;
+      return {
+        taskId: parsed.taskId,
+        name: String(parsed.name || 'Seedr download'),
+        status: parsed.status === 'completed' ? 'completed' : parsed.status === 'downloading' ? 'downloading' : 'waiting',
+        progress: Math.max(0, Math.min(100, Number(parsed.progress) || 0)),
+        downloadUrl: typeof parsed.downloadUrl === 'string' ? parsed.downloadUrl : null,
+        files: Array.isArray(parsed.files) ? parsed.files : [],
+      };
+    } catch {
+      return null;
+    }
+  });
   const [seedrFiles, setSeedrFiles] = useState<Array<{ id: string; name: string; size: number; folderId: string; folderPath: string }>>([]);
   const [seedrConfigured, setSeedrConfigured] = useState(false);
   const [seedrQuota, setSeedrQuota] = useState<{ maxSpace: number; usedSpace: number; remainingSpace: number } | null>(null);
@@ -451,6 +478,18 @@ export default function App() {
       throw error;
     }
   };
+
+  useEffect(() => {
+    try {
+      if (seedrNotice?.taskId != null && seedrNotice.status !== 'completed') {
+        window.localStorage.setItem(seedrNoticeStorageKey, JSON.stringify(seedrNotice));
+      } else {
+        window.localStorage.removeItem(seedrNoticeStorageKey);
+      }
+    } catch {
+      // Local storage may be unavailable in restricted browser contexts.
+    }
+  }, [seedrNotice]);
 
   useEffect(() => {
     if (!seedrNotice?.taskId || seedrNotice.status === 'completed') return;
@@ -920,7 +959,10 @@ export default function App() {
           <div className="flex items-center gap-2">
             {/* "+ Add Magnet" Primary CTA */}
             <button
-              onClick={() => setIsAddMagnetOpen(true)}
+              onClick={() => {
+                setInitialMagnet('');
+                setIsAddMagnetOpen(true);
+              }}
               className="px-3 sm:px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 text-xs sm:text-sm font-bold flex items-center gap-1.5 shadow-lg shadow-cyan-500/20 transition tap-target"
             >
               <Plus className="w-4 h-4 stroke-[3]" />
@@ -1076,7 +1118,7 @@ export default function App() {
                       <div className="mt-2">
                         <div className="flex items-center justify-between text-[11px] text-emerald-400/80 mb-1">
                           <span>Progress</span>
-                          <span>{Math.round(seedrNotice.progress)}%</span>
+                          <span>{Number(seedrNotice.progress).toFixed(2).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1')}%</span>
                         </div>
                         <div className="h-1.5 rounded-full bg-emerald-950 overflow-hidden">
                           <div
