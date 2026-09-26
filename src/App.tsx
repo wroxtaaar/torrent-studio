@@ -74,7 +74,16 @@ import { TorrentSearchPanel } from './components/TorrentSearchPanel.tsx';
 
 export default function App() {
   // Navigation & Theme
-  const [activeTab, setActiveTab] = useState<'search' | 'transfers' | 'files' | 'shared' | 'activity' | 'storage'>('search');
+  const [activeTab, setActiveTab] = useState<'search' | 'transfers' | 'files' | 'shared' | 'activity' | 'storage'>(() => {
+    try {
+      const saved = window.localStorage.getItem('seedflow_active_tab');
+      return saved === 'search' || saved === 'transfers' || saved === 'files' || saved === 'shared' || saved === 'activity' || saved === 'storage'
+        ? saved
+        : 'search';
+    } catch {
+      return 'search';
+    }
+  });
   const [theme, setTheme] = useState<'dark' | 'dim' | 'light'>(() => {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
@@ -103,7 +112,13 @@ export default function App() {
   const [seedrQuota, setSeedrQuota] = useState<{ maxSpace: number; usedSpace: number; remainingSpace: number } | null>(null);
   const [seedrLoading, setSeedrLoading] = useState(false);
   const [seedrError, setSeedrError] = useState<string | null>(null);
-  const [selectedSeedrFolderId, setSelectedSeedrFolderId] = useState<string | null>(null);
+  const [selectedSeedrFolderId, setSelectedSeedrFolderId] = useState<string | null>(() => {
+    try {
+      return window.localStorage.getItem('seedflow_seedr_folder') || null;
+    } catch {
+      return null;
+    }
+  });
 
   const seedrFolderGroups = useMemo(() => {
     const groups = new Map<string, {
@@ -135,7 +150,7 @@ export default function App() {
       }
     }
 
-    return Array.from(groups.values());
+    return Array.from(groups.values()).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
   }, [seedrFiles]);
 
   // File Explorer State
@@ -174,6 +189,27 @@ export default function App() {
   // state visible for a short reconciliation window so the 1.8s polling loop
   // cannot immediately overwrite a user's pause/resume click with stale state.
   const pendingTransferStates = useRef<Record<string, { state: 'pausedDL' | 'downloading'; expiresAt: number }>>({});
+
+  // Persist navigation so a browser refresh returns to the same page.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('seedflow_active_tab', activeTab);
+    } catch {
+      // Storage may be unavailable in restricted browser contexts.
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    try {
+      if (selectedSeedrFolderId) {
+        window.localStorage.setItem('seedflow_seedr_folder', selectedSeedrFolderId);
+      } else {
+        window.localStorage.removeItem('seedflow_seedr_folder');
+      }
+    } catch {
+      // Storage may be unavailable in restricted browser contexts.
+    }
+  }, [selectedSeedrFolderId]);
 
   // Theme synchronization
   useEffect(() => {
@@ -603,15 +639,18 @@ export default function App() {
   };
 
   const handleDeleteSeedrFile = async (file: { id: string; name: string; size: number; folderId: string; folderPath: string }) => {
-    const confirmed = window.confirm(
-      `Delete "${file.name}" from Seedr? Only this individual file will be removed.`
-    );
-    if (!confirmed) return;
-
     try {
       await api.deleteSeedrFile(file.id);
       setSeedrFiles(prev => prev.filter(item => item.id !== file.id));
       setSeedrError(null);
+      const quota = await api.getSeedrQuota().catch(() => null);
+      if (quota?.configured) {
+        setSeedrQuota({
+          maxSpace: quota.maxSpace,
+          usedSpace: quota.usedSpace,
+          remainingSpace: quota.remainingSpace
+        });
+      }
     } catch (error) {
       console.error('Failed to delete Seedr file:', error);
       setSeedrError(error instanceof Error ? error.message : 'Failed to delete Seedr file');
@@ -619,16 +658,19 @@ export default function App() {
   };
 
   const handleDeleteSeedrFolder = async (folderId: string, folderName: string) => {
-    const confirmed = window.confirm(
-      `Delete the entire Seedr folder "${folderName}" and all of its files? This cannot be undone.`
-    );
-    if (!confirmed) return;
-
     try {
       await api.deleteSeedrFolder(folderId);
       setSeedrFiles(prev => prev.filter(item => item.folderId !== folderId));
       setSelectedSeedrFolderId(prev => prev === folderId ? null : prev);
       setSeedrError(null);
+      const quota = await api.getSeedrQuota().catch(() => null);
+      if (quota?.configured) {
+        setSeedrQuota({
+          maxSpace: quota.maxSpace,
+          usedSpace: quota.usedSpace,
+          remainingSpace: quota.remainingSpace
+        });
+      }
     } catch (error) {
       console.error('Failed to delete Seedr folder:', error);
       setSeedrError(error instanceof Error ? error.message : 'Failed to delete Seedr folder');
@@ -899,19 +941,6 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setActiveTab('files')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition ${
-              activeTab === 'files'
-                ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <Folder className="w-4 h-4" />
-            <span>My Cloud Files</span>
-            <span className="text-[10px] opacity-70">({files.length})</span>
-          </button>
-
-          <button
             onClick={() => setActiveTab('activity')}
             className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition ${
               activeTab === 'activity'
@@ -1095,18 +1124,29 @@ export default function App() {
                   <p className="text-xs text-slate-400 mt-0.5">
                     Files already downloaded to your Seedr account stay visible here, even after refreshing Torrent Studio.
                   </p>
-                  {seedrConfigured && seedrQuota && (
-                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
-                      <span className="text-slate-400">
-                        Consumed: <strong className="text-slate-200">{formatBytes(seedrQuota.usedSpace)}</strong>
-                      </span>
-                      <span className="text-slate-400">
-                        Remaining: <strong className={seedrQuota.remainingSpace > 0 ? 'text-emerald-300' : 'text-rose-300'}>{formatBytes(seedrQuota.remainingSpace)}</strong>
-                      </span>
-                      <span className="text-slate-500">
-                        Total: {formatBytes(seedrQuota.maxSpace)}
-                      </span>
-                    </div>
+                  {seedrConfigured && (
+                    seedrQuota ? (
+                      <div className="mt-3 grid grid-cols-3 gap-2 max-w-xl">
+                        <div className="rounded-lg bg-slate-900/80 border border-slate-800 px-3 py-2">
+                          <div className="text-[10px] uppercase tracking-wide text-slate-500">Consumed</div>
+                          <div className="text-sm font-bold text-slate-100 mt-0.5">{formatBytes(seedrQuota.usedSpace)}</div>
+                        </div>
+                        <div className="rounded-lg bg-slate-900/80 border border-slate-800 px-3 py-2">
+                          <div className="text-[10px] uppercase tracking-wide text-slate-500">Remaining</div>
+                          <div className={`text-sm font-bold mt-0.5 ${seedrQuota.remainingSpace > 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                            {formatBytes(seedrQuota.remainingSpace)}
+                          </div>
+                        </div>
+                        <div className="rounded-lg bg-slate-900/80 border border-slate-800 px-3 py-2">
+                          <div className="text-[10px] uppercase tracking-wide text-slate-500">Total</div>
+                          <div className="text-sm font-bold text-slate-100 mt-0.5">{formatBytes(seedrQuota.maxSpace)}</div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-[11px] text-amber-300">
+                        Seedr space information is temporarily unavailable. Click Refresh Seedr to retry.
+                      </div>
+                    )
                   )}
                 </div>
                 <button
@@ -1224,7 +1264,7 @@ export default function App() {
                           </div>
 
                           <div className="grid grid-cols-1 gap-2">
-                            {folder.files.map(file => (
+                            {folder.files.slice().sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })).map(file => (
                               <div
                                 key={file.id}
                                 className="flex items-center justify-between gap-3 rounded-xl bg-slate-900/80 border border-slate-800 px-3 py-2.5"
