@@ -456,7 +456,12 @@ async def torrents_add(body: dict[str, Any]):
         seedr_magnet = _seedr_normalize_magnet(urls)
         info_hash = _seedr_info_hash(seedr_magnet)
         if not info_hash:
-            print("[SEEDR] magnet validation failed: no BTIH info hash could be extracted")
+            source_text = str(urls or "").strip()
+            print(
+                "[SEEDR] magnet validation failed: "
+                f"starts_magnet={bool(re.match(r'^magnet:', source_text, re.IGNORECASE))} "
+                f"length={len(source_text)}"
+            )
             raise HTTPException(400, "Seedr requires a valid magnet link with a BTIH info hash")
         print(f"[SEEDR] normalized magnet hash={info_hash}")
         seedr_result = await _seedr_find_task_by_hash(info_hash)
@@ -1260,12 +1265,40 @@ def _seedr_normalize_magnet(magnet: str) -> str:
 
 
 def _seedr_info_hash(magnet: str) -> str:
-    value = _seedr_normalize_magnet(magnet)
-    for candidate in (value, unquote(value)):
-        match = re.search(r"urn:btih:([a-zA-Z0-9]{32,40})", candidate, re.IGNORECASE)
+    # Be deliberately permissive when extracting the hash. The input may be
+    # a normal magnet, a percent-encoded magnet, or a wrapper URL that has
+    # already encoded the magnet query string.
+    candidates: list[str] = []
+    current = str(magnet or "").strip()
+    for _ in range(3):
+        if not current:
+            break
+        candidates.append(current)
+        decoded = unquote(current)
+        if decoded == current:
+            break
+        current = decoded
+
+    for candidate in candidates:
+        match = re.search(
+            r"(?:urn:btih:|btih:)([A-Za-z0-9]{32,40})",
+            candidate,
+            re.IGNORECASE,
+        )
         if match:
-            return match.group(1).lower()
-    return ""
+            value = match.group(1)
+            if len(value) == 40 and re.fullmatch(r"[A-Fa-f0-9]{40}", value):
+                return value.lower()
+            if len(value) == 32 and re.fullmatch(r"[A-Z2-7a-z2-7]{32}", value):
+                try:
+                    padded = value.upper() + "=" * ((8 - len(value) % 8) % 8)
+                    return base64.b32decode(padded).hex()
+                except Exception:
+                    pass
+
+    normalized = _seedr_normalize_magnet(magnet)
+    match = re.search(r"urn:btih:([A-Fa-z0-9]{40})", normalized, re.IGNORECASE)
+    return match.group(1).lower() if match else ""
 
 
 async def _seedr_add_task(magnet: str, folder_id: int) -> dict[str, Any]:
