@@ -193,43 +193,15 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
       setInspectedFiles([]);
       setInspectedSeedrTaskId(null);
 
-      // Direct magnets can use Seedr for metadata without creating a
-      // temporary qBittorrent torrent. Seedr returns the task and contents,
-      // so the selector can use the same task that will perform the download.
-      if (isDirectSeedrSource) {
-        try {
-          setInspectionSource('Loading torrent metadata from Seedr...');
-          const seedr = await api.prepareSeedrMagnet(source);
-          const seedrFiles = (seedr.files || []).map((file, index) => ({
-            index,
-            name: file.name,
-            size: Number(file.size || 0),
-            type: classifyFileType(file.name),
-            priority: 1
-          }));
+      // Always use qBittorrent for metadata inspection. This keeps the
+      // Seedr task from starting before the user has selected files. Seedr
+      // does not reliably support pausing prepared tasks on this account.
+      setInspectionSource(
+        isSearchGrab
+          ? 'Loading torrent metadata...'
+          : 'Adding torrent paused and waiting for qBittorrent metadata...'
+      );
 
-          if (seedrFiles.length > 0) {
-            const seedrTaskId = seedr.taskId;
-            setInspectedSeedrTaskId(seedrTaskId);
-            applyFileList(seedrFiles);
-            const hashMatch = source.match(/btih:([a-f0-9]{40})/i);
-            const hash = hashMatch ? hashMatch[1].toLowerCase() : '';
-            setInspectedHash(hash);
-
-            if (seedrFiles.length === 1) {
-              await startSingleFileDownload(source, seedrFiles, undefined, seedrTaskId);
-              return;
-            }
-
-            setInspectionSource('✓ Seedr metadata loaded • Multi-file torrent is ready for file selection');
-            return;
-          }
-
-          setInspectionSource('Seedr accepted the torrent, but file metadata is not ready yet. Falling back to qBittorrent metadata...');
-        } catch (seedrError: any) {
-          console.warn('Seedr metadata preparation failed; falling back to qBittorrent:', seedrError);
-          setInspectionSource('Seedr metadata unavailable. Falling back to qBittorrent metadata...');
-        }
       } else {
         setInspectionSource(
           isSearchGrab
@@ -491,15 +463,31 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     try {
       setIsLoading(true);
       setError('');
+      let selectedBackend: 'seedr' | 'qbittorrent' | undefined;
+      if (isDirectSeedrSource) {
+        try {
+          const quota = await api.getSeedrQuota();
+          if (
+            quota.configured &&
+            totalSelectedSize > 0 &&
+            totalSelectedSize < quota.remainingSpace
+          ) {
+            selectedBackend = 'seedr';
+          }
+        } catch {
+          // Quota lookup is best-effort; qBittorrent remains the fallback.
+        }
+      }
+
       await onAdd(
         magnetInput.trim(),
         category,
         selectedFileIndexes,
         manifest,
         inspectedHash || undefined,
-        isDirectSeedrSource && inspectedSeedrTaskId != null ? 'seedr' : undefined,
+        selectedBackend,
         undefined,
-        inspectedSeedrTaskId ?? undefined
+        undefined
       );
       setBackgroundMode(false);
       onClose();
