@@ -109,7 +109,7 @@ export default function App() {
   type SeedrNotice = {
     taskId: number | string | null;
     name: string;
-    status: 'waiting' | 'downloading' | 'completed';
+    status: 'waiting' | 'downloading' | 'completed' | 'not_found';
     progress: number;
     downloadUrl: string | null;
     files: Array<{ id: string; name: string; size: number; url: string | null }>;
@@ -553,6 +553,18 @@ export default function App() {
       try {
         const result = await api.getSeedrTask(seedrNotice.taskId!);
         if (!active) return;
+
+        // Seedr returning 404 means the task is gone. It must not be
+        // treated as "waiting", otherwise this card stays forever and can be
+        // restored from localStorage after a refresh even when Seedr is empty.
+        if (result.status === 'not_found') {
+          setSeedrNotice(null);
+          setSeedrAddBlockedNotice(null);
+          try {
+            window.localStorage.removeItem(seedrNoticeStorageKey);
+          } catch {}
+          return;
+        }
 
         const progress = Number(result.progress) || 0;
         const completed = result.status === 'completed';
