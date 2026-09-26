@@ -3,4 +3,4 @@ uvicorn[standard]==0.36.0
 httpx==0.28.1
 aiofiles==24.1.0
 python-multipart==0.0.20
-bencodepy==1.1.0
+bencodepy==0.9.5
