@@ -34,7 +34,8 @@ interface AddMagnetModalProps {
     category: string,
     selectedFiles?: number[],
     manifest?: { name: string; size: number; priority: number }[],
-    existingHash?: string
+    existingHash?: string,
+    forceBackend?: 'seedr' | 'qbittorrent'
   ) => Promise<void>;
   defaultFolder?: string;
   initialMagnet?: string;
@@ -287,6 +288,9 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
 
   const isSingleFile = inspectedFiles.length === 1;
   const isSearchGrab = /^\/api\/search\/torrents\/grab\//i.test(magnetInput.trim());
+  const isDirectSeedrSource =
+    !isSearchGrab &&
+    (/^magnet:\?/i.test(magnetInput.trim()) || /^[a-f0-9]{40}$/i.test(magnetInput.trim()));
 
   const resolveMagnetUri = async (): Promise<string> => {
     const source = magnetInput.trim();
@@ -362,6 +366,30 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
     e.preventDefault();
     if (!magnetInput.trim()) {
       setError('Please provide a magnet link or hash.');
+      return;
+    }
+
+    // Directly pasted magnets/hashes go straight to Seedr. There is no reason
+    // to create a paused qBittorrent metadata task first.
+    if (isDirectSeedrSource) {
+      try {
+        setIsLoading(true);
+        setError('');
+        await onAdd(
+          magnetInput.trim(),
+          category,
+          undefined,
+          undefined,
+          undefined,
+          'seedr'
+        );
+        setBackgroundMode(false);
+        onClose();
+      } catch (err: any) {
+        setError(err?.message || 'Seedr could not accept the magnet link.');
+      } finally {
+        setIsLoading(false);
+      }
       return;
     }
 
@@ -736,7 +764,9 @@ export const AddMagnetModal: React.FC<AddMagnetModalProps> = ({
             <button
               type="button"
               onClick={() => {
-                if (selectedCount > 0) {
+                if (isDirectSeedrSource) {
+                  void handleSubmit({ preventDefault: () => {} } as React.FormEvent);
+                } else if (selectedCount > 0) {
                   void handleSubmit({ preventDefault: () => {} } as React.FormEvent);
                 } else if (magnetInput.trim() && !isInspecting) {
                   void triggerInspect(magnetInput.trim());
