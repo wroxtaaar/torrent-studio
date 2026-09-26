@@ -574,7 +574,7 @@ export async function listSeedrLibrary(): Promise<SeedrLibraryFile[]> {
   // each task is stored under folder_id and may have a folder_created_id
   // containing the completed files. Follow those task-created folders instead
   // of exposing unrelated files from the rest of the Seedr account.
-  if (!SEEDR_LIBRARY_FOLDER_ID || !/^\\d+$/.test(SEEDR_LIBRARY_FOLDER_ID)) {
+  if (!SEEDR_LIBRARY_FOLDER_ID || !/^\d+$/.test(SEEDR_LIBRARY_FOLDER_ID)) {
     console.warn('[SEEDR] SEEDR_LIBRARY_FOLDER_ID is not configured; library listing is disabled to avoid exposing unrelated account files.');
     return [];
   }
