@@ -1395,8 +1395,54 @@ async def _seedr_find_task_by_hash(info_hash: str) -> dict[str, Any] | None:
         task = _seedr_data(raw)
         if not isinstance(task, dict):
             continue
-        if _seedr_task_info_hash(task) == target:
-            return task
+        if _seedr_task_info_hash(task) != target:
+            continue
+
+        # Seedr keeps completed task records even after the downloaded files
+        # have been deleted from the filesystem. Reusing such a stale task
+        # makes the subsequent /unwanted call fail with "torrent_already_downloaded"
+        # and prevents the same magnet from being added again.
+        if _seedr_task_complete(task):
+            folder_created_id = str(task.get("folder_created_id") or "").strip()
+            if not folder_created_id:
+                print(
+                    f"[SEEDR] ignoring stale completed task "
+                    f"{task.get('user_torrent_id') or task.get('id') or 'unknown'}: "
+                    "no created folder"
+                )
+                continue
+
+            try:
+                folder_payload = _seedr_data(
+                    await seedr_request(
+                        f"/fs/folder/{quote(folder_created_id)}/contents"
+                    )
+                )
+                if not isinstance(folder_payload, dict):
+                    continue
+
+                folder_files = _seedr_array(folder_payload, ("files", "items"))
+                folder_children = _seedr_array(
+                    folder_payload, ("folders", "directories")
+                )
+                if not folder_files and not folder_children:
+                    print(
+                        f"[SEEDR] ignoring stale completed task "
+                        f"{task.get('user_torrent_id') or task.get('id') or 'unknown'}: "
+                        f"created folder {folder_created_id} is empty"
+                    )
+                    continue
+            except HTTPException as exc:
+                if exc.status_code == 404:
+                    print(
+                        f"[SEEDR] ignoring stale completed task "
+                        f"{task.get('user_torrent_id') or task.get('id') or 'unknown'}: "
+                        f"created folder {folder_created_id} no longer exists"
+                    )
+                    continue
+                raise
+
+        return task
 
     return None
 
