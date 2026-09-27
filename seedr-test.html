@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Seedr Browser Stream Test</title>
+  <style>
+    :root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+    body{margin:0;background:#0b1020;color:#e5e7eb;padding:24px}
+    main{max-width:1000px;margin:auto}
+    h1{margin-top:0}
+    .card{background:#121a2b;border:1px solid #26324a;border-radius:14px;padding:18px;margin:16px 0}
+    input{width:100%;box-sizing:border-box;background:#0a1020;color:#fff;border:1px solid #334155;border-radius:10px;padding:12px}
+    button{margin-top:10px;background:#22d3ee;color:#061018;border:0;border-radius:10px;padding:11px 16px;font-weight:700;cursor:pointer}
+    video{width:100%;max-height:70vh;background:#000;border-radius:12px}
+    pre{white-space:pre-wrap;word-break:break-word;color:#a7f3d0;font-size:13px}
+    .muted{color:#94a3b8;font-size:14px}
+  </style>
+</head>
+<body>
+<main>
+  <h1>Seedr → Browser Stream Test</h1>
+  <p class="muted">Standalone experiment. It does not use Torrent Studio, qBittorrent, or the Seedr API.</p>
+  <div class="card">
+    <label for="url">Seedr direct video URL</label>
+    <input id="url" type="url" placeholder="Paste the direct Seedr file/video URL that works in VLC or MX Player">
+    <button id="play">Play in browser</button>
+  </div>
+  <div class="card">
+    <video id="video" controls playsinline preload="metadata"></video>
+  </div>
+  <div class="card">
+    <strong>Browser diagnostics</strong>
+    <pre id="log">Waiting for a URL…</pre>
+  </div>
+</main>
+<script>
+const input=document.getElementById('url');
+const video=document.getElementById('video');
+const log=document.getElementById('log');
+const write=(m)=>{log.textContent += '\n'+m};
+document.getElementById('play').onclick=()=>{
+  const url=input.value.trim();
+  if(!url){log.textContent='Paste a direct Seedr video URL first.';return}
+  log.textContent='Loading direct URL…';
+  video.pause();
+  video.removeAttribute('src');
+  video.load();
+  video.src=url;
+  video.load();
+  write('URL assigned to native <video>.');
+};
+['loadstart','loadedmetadata','loadeddata','canplay','canplaythrough','play','playing','pause','waiting','stalled','suspend','seeking','seeked','ended'].forEach(e=>{
+  video.addEventListener(e,()=>write(e+' | readyState='+video.readyState+' networkState='+video.networkState+' currentTime='+video.currentTime));
+});
+video.addEventListener('error',()=>{
+  const e=video.error;
+  write('MEDIA ERROR | code='+(e?.code??'unknown')+' message='+(e?.message||'browser did not expose a message'));
+});
+</script>
+</body>
+</html>
