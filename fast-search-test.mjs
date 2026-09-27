@@ -222,18 +222,24 @@ async function resolveMetadata(magnet, keepActive = true) {
 
   const started = performance.now();
 
-  return withTimeout(new Promise((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     let settled = false;
     let torrent;
 
     const fail = error => {
       if (settled) return;
       settled = true;
+      clearTimeout(timeout);
       if (torrent) {
-        try { torrent.destroy(); } catch {}
+        try { torrent.destroy({ destroyStore: true }); } catch {}
       }
       reject(error);
     };
+
+    const timeout = setTimeout(() => {
+      fail(new Error('Metadata resolution timed out'));
+    }, 45000);
+    timeout.unref?.();
 
     try {
       torrent = client.add(magnet, {
@@ -251,19 +257,20 @@ async function resolveMetadata(magnet, keepActive = true) {
         try { torrent.pause(); } catch {}
 
         const metadata = metadataFromTorrent(torrent, elapsedMs, magnet);
+        clearTimeout(timeout);
 
         if (keepActive) {
           const id = torrent.infoHash;
           active.set(id, { torrent, createdAt: Date.now(), metadata });
 
-          const timer = setTimeout(() => {
+          const cleanup = setTimeout(() => {
             const entry = active.get(id);
             if (entry?.torrent === torrent) {
               active.delete(id);
               try { client.remove(torrent, { destroyStore: true }); } catch {}
             }
           }, 10 * 60 * 1000);
-          timer.unref?.();
+          cleanup.unref?.();
         } else {
           try { client.remove(torrent, { destroyStore: true }); } catch {}
         }
@@ -279,9 +286,8 @@ async function resolveMetadata(magnet, keepActive = true) {
     } catch (error) {
       fail(error);
     }
-  }), 45000, 'Metadata resolution');
+  });
 }
-
 app.get('/', (_req, res) => {
   res.sendFile(process.cwd() + '/fast-search-test.html');
 });
